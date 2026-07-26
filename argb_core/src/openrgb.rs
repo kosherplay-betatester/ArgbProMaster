@@ -92,6 +92,30 @@ impl ControllerInfo {
         }
         None
     }
+
+    /// The device's own built-in showpiece effect — what most hardware plays
+    /// out of the box before any software touches it. Used to hand control
+    /// back to the firmware ("restore original lighting").
+    pub fn firmware_mode(&self) -> Option<(u32, &ModeInfo)> {
+        for wanted in [
+            "Rainbow",
+            "Rainbow Wave",
+            "Spectrum Cycle",
+            "Color Cycle",
+            "Colour Cycle",
+            "Breathing",
+        ] {
+            let hit = self
+                .modes
+                .iter()
+                .enumerate()
+                .find(|(_, m)| m.name.trim().eq_ignore_ascii_case(wanted));
+            if let Some((i, m)) = hit {
+                return Some((i as u32, m));
+            }
+        }
+        None
+    }
 }
 
 pub fn encode_header(device: u32, packet_id: u32, len: u32) -> [u8; 16] {

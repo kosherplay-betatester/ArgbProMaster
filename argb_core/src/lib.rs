@@ -3,6 +3,7 @@
 //! thermal daemon (real hardware output). Keeping the renderer here guarantees
 //! the preview is pixel-identical to what the LEDs will do.
 
+pub mod afterburner;
 pub mod engine;
 pub mod openrgb;
 pub mod presets;

@@ -52,6 +52,11 @@ pub struct App {
     settings_stamp: Option<std::time::SystemTime>,
     // setup assistant: detect + offer to install/start missing software
     setup: SetupState,
+    // "restore original lighting" background operation
+    restore_rx: Option<mpsc::Receiver<Result<usize, String>>>,
+    // live preview temperature source: mock sliders or real sensors
+    pub live_temps: bool,
+    mahm: Option<argb_core::afterburner::MahmReader>,
     _tray: Option<tray::Tray>,
 }
 
@@ -120,12 +125,54 @@ impl App {
             last_daemon_check: Instant::now(),
             settings_stamp: argb_core::settings::settings_mtime(),
             setup: SetupState::new(),
+            restore_rx: None,
+            live_temps: false,
+            mahm: None,
             _tray: tray,
         }
     }
 
+    /// Stop the daemon and hand every device back to its own built-in effect
+    /// (the look it shipped with before any software touched it).
+    pub fn restore_hardware_lighting(&mut self) {
+        if self.restore_rx.is_some() {
+            return;
+        }
+        util::stop_daemon();
+        let (tx, rx) = mpsc::channel();
+        self.restore_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = (|| -> Result<usize, String> {
+                // Give the daemon a moment to die, so its mode guard can't
+                // steal the devices back into Direct behind us.
+                std::thread::sleep(Duration::from_millis(800));
+                let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 6742));
+                let mut client =
+                    argb_core::openrgb::OpenRgbClient::connect(addr, "ArgbProMaster restore")
+                        .map_err(|e| e.to_string())?;
+                let count = client.controller_count().map_err(|e| e.to_string())?;
+                let mut restored = 0usize;
+                for device in 0..count {
+                    let Ok(info) = client.controller_data(device) else { continue };
+                    if let Some((idx, mode)) = info.firmware_mode() {
+                        let mode = mode.clone();
+                        if client.update_mode(device, idx, &mode).is_ok() {
+                            restored += 1;
+                        }
+                    }
+                }
+                Ok(restored)
+            })();
+            let _ = tx.send(result);
+        });
+    }
+
     pub fn toast(&mut self, message: String, color: Color32) {
         self.status = Some((message, color, Instant::now()));
+    }
+
+    pub fn restore_running(&self) -> bool {
+        self.restore_rx.is_some()
     }
 
     /// Kick off a background scan of the OpenRGB server. Runs on a thread so
@@ -462,6 +509,44 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Live preview temps: follow the real sensors when asked to, so the
+        // preview animates exactly like the LEDs do right now.
+        if self.live_temps {
+            if self.mahm.is_none() {
+                self.mahm = argb_core::afterburner::MahmReader::open();
+            }
+            if let Some(temps) = self.mahm.as_ref().and_then(|m| m.read_temps()) {
+                if let Some(c) = temps.cpu {
+                    self.sim_cpu = c;
+                }
+                if let Some(g) = temps.gpu {
+                    self.sim_gpu = g;
+                }
+            }
+        } else {
+            self.mahm = None;
+        }
+
+        // Report a finished "restore original lighting" run.
+        if let Some(rx) = &self.restore_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.restore_rx = None;
+                match result {
+                    Ok(n) => self.toast(
+                        format!(
+                            "✨ {n} device(s) handed back to their built-in lighting — daemon stopped. \
+                             Press Apply & Save (or ▶ Start Daemon) whenever you want ArgbProMaster back."
+                        ),
+                        theme::OK,
+                    ),
+                    Err(e) => self.toast(
+                        format!("Couldn't restore hardware lighting: {e}. Is OpenRGB running?"),
+                        theme::DANGER,
+                    ),
+                }
+            }
+        }
+
         // Smooth the simulated temperatures with the same easing feel the
         // daemon applies per frame (scaled by real elapsed time here).
         let dt = ctx.input(|i| i.stable_dt).min(0.1);

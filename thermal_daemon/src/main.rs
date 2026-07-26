@@ -7,9 +7,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(windows)]
-mod afterburner;
-
+use argb_core::afterburner;
 use argb_core::engine;
 use argb_core::openrgb::{self, OpenRgbClient};
 use argb_core::settings::Settings;
@@ -433,22 +431,3 @@ fn send_frame(
     Ok(())
 }
 
-// Keep unused-import warnings away on non-Windows check builds where the
-// afterburner module is compiled out.
-#[cfg(not(windows))]
-mod afterburner {
-    #[derive(Clone, Copy, Debug, Default)]
-    pub struct Temps {
-        pub cpu: Option<f32>,
-        pub gpu: Option<f32>,
-    }
-    pub struct MahmReader;
-    impl MahmReader {
-        pub fn open() -> Option<MahmReader> {
-            None
-        }
-        pub fn read_temps(&self) -> Option<Temps> {
-            None
-        }
-    }
-}

@@ -786,15 +786,30 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
             }
         });
         ui.separator();
-        if ui
-            .add(egui::Button::new(RichText::new("♻ Reset All to Defaults").color(theme::DANGER)))
-            .on_hover_text("Restores every setting to factory defaults. Your saved custom presets are kept.")
-            .clicked()
-        {
-            let kept = app.settings.custom_presets.clone();
-            app.settings = Settings::default();
-            app.settings.custom_presets = kept;
-            app.toast("Settings reset to defaults (custom presets kept).".to_string(), theme::WARN);
-        }
+        ui.horizontal(|ui| {
+            if ui
+                .add(egui::Button::new(RichText::new("♻ Reset All to Defaults").color(theme::DANGER)))
+                .on_hover_text("Restores every APP setting to factory defaults (custom presets are kept). Your LEDs keep following the daemon — use the button beside this one to hand them back to the hardware.")
+                .clicked()
+            {
+                let kept = app.settings.custom_presets.clone();
+                app.settings = Settings::default();
+                app.settings.custom_presets = kept;
+                app.toast("Settings reset to defaults (custom presets kept).".to_string(), theme::WARN);
+            }
+            let restoring = app.restore_running();
+            if ui
+                .add_enabled(!restoring, egui::Button::new("💡 Restore original lighting"))
+                .on_hover_text(
+                    "Stops the daemon and switches every device back to its own built-in effect — \
+                     the look your LEDs had when first connected to the motherboard (usually the \
+                     firmware rainbow). ArgbProMaster stays out of the way until you start it again.",
+                )
+                .clicked()
+            {
+                app.restore_hardware_lighting();
+                app.toast("Handing your lighting back to the hardware…".to_string(), theme::OK);
+            }
+        });
     });
 }
