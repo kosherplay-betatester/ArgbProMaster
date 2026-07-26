@@ -559,7 +559,11 @@ impl Settings {
         }
         let json = serde_json::to_string_pretty(&copy)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        std::fs::write(path, json)
+        // Write-then-rename so the hot-reloading daemon can never observe a
+        // half-written file (a torn read used to reset it to defaults).
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, &path)
     }
 }
 

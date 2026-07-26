@@ -55,6 +55,9 @@ struct ResolvedZone {
     leds: u32,
     /// Index into `settings.zones`.
     cfg: usize,
+    /// Last frame actually sent — identical frames are skipped entirely, so a
+    /// static look costs zero traffic (RTSS-style: do nothing unless needed).
+    last_frame: Vec<[u8; 3]>,
 }
 
 /// Where the configured zones actually live on the OpenRGB server.
@@ -78,12 +81,20 @@ fn main() {
     let Some(_guard) = SingleInstance::acquire(DAEMON_MUTEX_NAME) else {
         return;
     };
+    // A crash must never be silent: log the panic before dying, so
+    // daemon.log always tells crash apart from external kill.
+    std::panic::set_hook(Box::new(|info| {
+        note(&format!("PANIC: {info}"));
+    }));
     note("daemon starting");
 
     let mut settings = Settings::load_or_create();
     let mut settings_stamp = argb_core::settings::settings_mtime();
 
     let mut mahm = MahmSource::new();
+    // Report the thermal sources once, so the log shows what was detected on
+    // this machine (works with any CPU/GPU vendor Afterburner supports).
+    let mut thermal_reported = false;
 
     // Smoothed "working" temperatures, seeded at the cool end of the curves.
     let mut cpu_work = settings.cpu_temp_min;
@@ -171,19 +182,28 @@ fn main() {
                 }
             }
 
-            // Hot-reload settings on mtime change.
+            // Hot-reload settings on mtime change. A torn or unreadable file
+            // (mid-write) keeps the current settings instead of nuking them
+            // to defaults — the next mtime change retries.
             let stamp = argb_core::settings::settings_mtime();
             if stamp != settings_stamp {
                 settings_stamp = stamp;
-                let fresh = Settings::load_or_default();
-                let remap = fresh.zones != settings.zones;
-                settings = fresh;
-                note(&format!("settings reloaded (preset \"{}\")", settings.active_preset));
-                if remap {
-                    match discover(&mut client, &settings) {
-                        Ok(m) => map = m,
-                        Err(_) => break 'frames,
+                let parsed = std::fs::read_to_string(argb_core::settings::settings_path())
+                    .ok()
+                    .and_then(|text| Settings::from_json(&text));
+                match parsed {
+                    Some(fresh) => {
+                        let remap = fresh.zones != settings.zones;
+                        settings = fresh;
+                        note(&format!("settings reloaded (preset \"{}\")", settings.active_preset));
+                        if remap {
+                            match discover(&mut client, &settings) {
+                                Ok(m) => map = m,
+                                Err(_) => break 'frames,
+                            }
+                        }
                     }
+                    None => note("settings.json unreadable (mid-write?) — keeping current settings"),
                 }
             }
             if client.device_list_dirty {
@@ -196,6 +216,18 @@ fn main() {
 
             // Pull fresh thermal targets when Afterburner is available.
             if let Some(temps) = mahm.read() {
+                if !thermal_reported {
+                    thermal_reported = true;
+                    let show = |t: Option<f32>| match t {
+                        Some(v) => format!("found ({v:.0}\u{00B0}C)"),
+                        None => "not found".to_string(),
+                    };
+                    note(&format!(
+                        "thermal sources detected via MSI Afterburner: CPU {} / GPU {}",
+                        show(temps.cpu),
+                        show(temps.gpu)
+                    ));
+                }
                 if let Some(c) = temps.cpu {
                     cpu_target = c;
                 }
@@ -212,7 +244,7 @@ fn main() {
             let gpu_norm = engine::normalize_temp(gpu_work, settings.gpu_temp_min, settings.gpu_temp_max);
             let time = animation_start.elapsed().as_secs_f64();
 
-            if send_frame(&mut client, &map, &settings, time, cpu_norm, gpu_norm).is_err() {
+            if send_frame(&mut client, &mut map, &settings, time, cpu_norm, gpu_norm).is_err() {
                 note("OpenRGB connection lost — reconnecting");
                 break 'frames;
             }
@@ -318,6 +350,7 @@ fn discover(client: &mut OpenRgbClient, settings: &Settings) -> std::io::Result<
                 zone_idx: det.zone_idx,
                 leds,
                 cfg: cfg_idx,
+                last_frame: Vec::new(),
             });
         }
     }
@@ -371,23 +404,27 @@ fn switch_to_direct(
 
 fn send_frame(
     client: &mut OpenRgbClient,
-    map: &RenderMap,
+    map: &mut RenderMap,
     settings: &Settings,
     time: f64,
     cpu_norm: f32,
     gpu_norm: f32,
 ) -> std::io::Result<()> {
-    for zone in &map.zones {
+    for zone in map.zones.iter_mut() {
         let Some(cfg) = settings.zones.get(zone.cfg) else {
             continue; // settings shrank since resolve; remap follows shortly
         };
         let frame =
             engine::render_zone_config(settings, cfg, zone.leds as usize, time, cpu_norm, gpu_norm);
+        if frame == zone.last_frame {
+            continue; // nothing changed — skip the write entirely
+        }
         if zone.zone_idx >= 0 {
             client.update_zone(zone.device, zone.zone_idx as u32, &frame)?;
         } else {
             client.update_leds(zone.device, &frame)?;
         }
+        zone.last_frame = frame;
     }
     Ok(())
 }
