@@ -354,7 +354,20 @@ impl eframe::App for App {
                     });
             });
 
-        // Keep the preview animating (~30 FPS) and tray/status responsive.
-        ctx.request_repaint_after(Duration::from_millis(33));
+        // Repaint pacing = CPU use. Full 30 FPS only while the user is
+        // actually looking; ~10 FPS unfocused; ~1 FPS minimized/hidden so a
+        // parked configurator costs (almost) nothing.
+        let (focused, minimized) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.focused.unwrap_or(true), v.minimized.unwrap_or(false))
+        });
+        let delay = if minimized {
+            Duration::from_millis(1000)
+        } else if focused {
+            Duration::from_millis(33)
+        } else {
+            Duration::from_millis(100)
+        };
+        ctx.request_repaint_after(delay);
     }
 }
