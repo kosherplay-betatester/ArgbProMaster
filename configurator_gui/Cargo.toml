@@ -1,0 +1,15 @@
+[package]
+name = "configurator_gui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argb_core.workspace = true
+eframe = "0.31"
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.20"
+# Only for extracting the HWND from eframe's CreationContext — already in the
+# dependency tree via eframe/winit, so this adds no new code.
+raw-window-handle = "0.6"

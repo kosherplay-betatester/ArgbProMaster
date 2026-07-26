@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned per-project: the GUI dependency tree (eframe & friends) ships
+# edition-2024 manifests that Cargo < 1.85 cannot parse. This does not
+# affect the system-wide default toolchain.
+channel = "1.88.0"

@@ -1,0 +1,7 @@
+[package]
+name = "thermal_daemon"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argb_core.workspace = true
