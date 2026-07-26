@@ -36,6 +36,10 @@ dark-themed GUI whose live preview is **pixel-identical** to what your LEDs do.
   setup.
 - 🖥 **Live preview with a thermal simulator** — drag mock CPU/GPU sliders to
   see a 95 °C meltdown without heating your PC.
+- 😴 **Idle Effect** — pick a temperature range (say 35–50 °C) and a calmer
+  look: the moment a zone's sensor cools into the range, the idle effect kicks
+  in (any builtin or your own ★ creation); heat back up and the normal effect
+  returns. Configured in the Thermal Curves tab.
 - 🔔 **Tray quick menu** — switch effects on the fly, without opening the window.
 - 🚑 **Built-in setup assistant** — the app detects missing requirements and
   offers to fix them itself: one click installs OpenRGB or MSI Afterburner
@@ -135,7 +139,7 @@ within a second, live.
 |---|---|
 | 🎨 **Presets & Themes** | One-click looks + save/load your own named presets. |
 | 🔌 **Zones & Ports** | Everything OpenRGB detected. Per zone: enable, LED count, CPU/GPU source, its own effect (builtin or ★ custom), its own colors. |
-| 🌡 **Thermal Curves** | The temperature window per sensor (e.g. 40–85 °C), the global cold→warm→hot colors, the global effect, and the 🎛 per-effect tuning card (Speed / Intensity / Style). |
+| 🌡 **Thermal Curves** | The temperature window per sensor (e.g. 40–85 °C), the global cold→warm→hot colors, the global effect, the 🎛 per-effect tuning card (Speed / Intensity / Style), and the 😴 Idle Effect (range + look shown while temps rest). |
 | 🧪 **Effect Lab** | Build, edit and manage your own ★ effects with a live preview. |
 | ⚙ **Advanced** | Animation FPS, easing, brightness with a 70% Safety Power Lock, daemon start/stop, and **Reset All to Defaults**. |
 

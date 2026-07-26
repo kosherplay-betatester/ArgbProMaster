@@ -80,6 +80,7 @@ fn library_card(app: &mut App, ui: &mut egui::Ui) {
 fn editor_card(app: &mut App, ui: &mut egui::Ui) {
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("Effect editor").strong());
+        ui.spacing_mut().slider_width = (ui.available_width() * 0.35).clamp(120.0, 220.0);
         ui.add_space(4.0);
 
         let fx = &mut app.effect_draft;

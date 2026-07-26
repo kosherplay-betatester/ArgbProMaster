@@ -389,6 +389,26 @@ pub struct PresetData {
     pub effect_tuning: BTreeMap<EffectsMode, EffectTuning>,
     #[serde(default)]
     pub global_custom_effect: Option<String>,
+    #[serde(default)]
+    pub idle_enabled: bool,
+    #[serde(default = "default_idle_min")]
+    pub idle_temp_min: f32,
+    #[serde(default = "default_idle_max")]
+    pub idle_temp_max: f32,
+    #[serde(default = "default_idle_effect")]
+    pub idle_effect: EffectsMode,
+    #[serde(default)]
+    pub idle_custom_effect: Option<String>,
+}
+
+fn default_idle_min() -> f32 {
+    35.0
+}
+fn default_idle_max() -> f32 {
+    50.0
+}
+fn default_idle_effect() -> EffectsMode {
+    EffectsMode::Breathing
 }
 
 impl PresetData {
@@ -406,6 +426,11 @@ impl PresetData {
             zones: s.zones.clone(),
             effect_tuning: s.effect_tuning.clone(),
             global_custom_effect: s.global_custom_effect.clone(),
+            idle_enabled: s.idle_enabled,
+            idle_temp_min: s.idle_temp_min,
+            idle_temp_max: s.idle_temp_max,
+            idle_effect: s.idle_effect,
+            idle_custom_effect: s.idle_custom_effect.clone(),
         }
     }
 
@@ -422,6 +447,11 @@ impl PresetData {
         s.zones = self.zones.clone();
         s.effect_tuning = self.effect_tuning.clone();
         s.global_custom_effect = self.global_custom_effect.clone();
+        s.idle_enabled = self.idle_enabled;
+        s.idle_temp_min = self.idle_temp_min;
+        s.idle_temp_max = self.idle_temp_max;
+        s.idle_effect = self.idle_effect;
+        s.idle_custom_effect = self.idle_custom_effect.clone();
     }
 }
 
@@ -456,6 +486,14 @@ pub struct Settings {
     /// A custom effect used as the global effect (wins over `effects_mode`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub global_custom_effect: Option<String>,
+    /// Idle mode: when a zone's temperature sits inside [idle_temp_min,
+    /// idle_temp_max] °C, it shows the idle effect instead of its normal one.
+    pub idle_enabled: bool,
+    pub idle_temp_min: f32,
+    pub idle_temp_max: f32,
+    pub idle_effect: EffectsMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_custom_effect: Option<String>,
 }
 
 /// Stock brightness, shared by `Settings::default` and the preset baseline
@@ -482,6 +520,11 @@ impl Default for Settings {
             effect_tuning: BTreeMap::new(),
             custom_effects: Vec::new(),
             global_custom_effect: None,
+            idle_enabled: false,
+            idle_temp_min: 35.0,
+            idle_temp_max: 50.0,
+            idle_effect: EffectsMode::Breathing,
+            idle_custom_effect: None,
         }
     }
 }
@@ -505,6 +548,11 @@ impl Settings {
         for fx in self.custom_effects.iter_mut() {
             fx.sanitize();
         }
+        self.idle_temp_min = self.idle_temp_min.clamp(0.0, 109.0);
+        if self.idle_temp_max <= self.idle_temp_min + 1.0 {
+            self.idle_temp_max = self.idle_temp_min + 1.0;
+        }
+        self.idle_temp_max = self.idle_temp_max.clamp(1.0, 110.0);
     }
 
     /// Look up a custom effect by name.

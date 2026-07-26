@@ -244,7 +244,7 @@ fn main() {
             let gpu_norm = engine::normalize_temp(gpu_work, settings.gpu_temp_min, settings.gpu_temp_max);
             let time = animation_start.elapsed().as_secs_f64();
 
-            if send_frame(&mut client, &mut map, &settings, time, cpu_norm, gpu_norm).is_err() {
+            if send_frame(&mut client, &mut map, &settings, time, cpu_norm, gpu_norm, cpu_work, gpu_work).is_err() {
                 note("OpenRGB connection lost — reconnecting");
                 break 'frames;
             }
@@ -402,6 +402,7 @@ fn switch_to_direct(
 // Frame rendering
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn send_frame(
     client: &mut OpenRgbClient,
     map: &mut RenderMap,
@@ -409,13 +410,16 @@ fn send_frame(
     time: f64,
     cpu_norm: f32,
     gpu_norm: f32,
+    cpu_c: f32,
+    gpu_c: f32,
 ) -> std::io::Result<()> {
     for zone in map.zones.iter_mut() {
         let Some(cfg) = settings.zones.get(zone.cfg) else {
             continue; // settings shrank since resolve; remap follows shortly
         };
-        let frame =
-            engine::render_zone_config(settings, cfg, zone.leds as usize, time, cpu_norm, gpu_norm);
+        let frame = engine::render_zone_config(
+            settings, cfg, zone.leds as usize, time, cpu_norm, gpu_norm, cpu_c, gpu_c,
+        );
         if frame == zone.last_frame {
             continue; // nothing changed — skip the write entirely
         }

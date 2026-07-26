@@ -23,6 +23,9 @@ pub fn presets_tab(app: &mut App, ui: &mut egui::Ui) {
     );
 
     let mut to_apply: Option<&'static str> = None;
+    // Two cards per row, sized to whatever width is actually available so
+    // nothing clips on smaller windows.
+    let card_w = ((ui.available_width() - 24.0) / 2.0).clamp(240.0, 380.0);
     for pair in BUILTIN_PRESETS.chunks(2) {
         ui.horizontal(|ui| {
             for preset in pair {
@@ -32,7 +35,7 @@ pub fn presets_tab(app: &mut App, ui: &mut egui::Ui) {
                     frame = frame.stroke(egui::Stroke::new(1.5, theme::ACCENT));
                 }
                 frame.show(ui, |ui| {
-                    ui.set_width(330.0);
+                    ui.set_width(card_w);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(preset.emoji).size(22.0));
                         ui.label(RichText::new(preset.name).strong().size(16.0));
@@ -114,10 +117,11 @@ fn custom_presets_section(app: &mut App, ui: &mut egui::Ui) {
 
     theme::card_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
+            let name_w = (ui.available_width() * 0.4).clamp(150.0, 280.0);
             ui.add(
                 egui::TextEdit::singleline(&mut app.new_preset_name)
                     .hint_text("Name your masterpiece…")
-                    .desired_width(260.0),
+                    .desired_width(name_w),
             )
             .on_hover_text("The name for the new custom preset. Re-using a name overwrites that preset.");
             let save = ui
@@ -301,9 +305,10 @@ fn zone_row(
     ui.horizontal(|ui| {
         ui.checkbox(&mut zone.enabled, "")
             .on_hover_text("Switch this zone's lighting on or off. Off = we leave it completely alone.");
+        let name_w = (ui.available_width() * 0.4).clamp(140.0, 260.0);
         ui.add(
             egui::TextEdit::singleline(&mut zone.display_name)
-                .desired_width(220.0)
+                .desired_width(name_w)
                 .hint_text("Friendly name…"),
         )
         .on_hover_text("Your label for this zone — for you, not the hardware.");
@@ -431,6 +436,8 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
         "🌡 Thermal Response Curves",
         "Choose the temperature window each sensor sweeps across, and the colors the lights travel through.",
     );
+    // Sliders scale with the window instead of overflowing it.
+    ui.spacing_mut().slider_width = (ui.available_width() * 0.4).clamp(140.0, 240.0);
 
     let s = &mut app.settings;
     theme::card_frame().show(ui, |ui| {
@@ -527,6 +534,79 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
 
     ui.add_space(8.0);
     effect_tuning_card(app, ui);
+    ui.add_space(8.0);
+    idle_effect_card(app, ui);
+}
+
+/// 😴 Idle Effect: a calmer look that kicks in while temps rest in a range.
+fn idle_effect_card(app: &mut App, ui: &mut egui::Ui) {
+    let s = &mut app.settings;
+    theme::card_frame().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("😴 Idle Effect").strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.checkbox(&mut s.idle_enabled, "Enabled")
+                    .on_hover_text("When a zone's temperature sits inside the range below, show the idle effect instead of its normal one — e.g. calm Stealth-style breathing while the PC is chilling.");
+            });
+        });
+        ui.label(
+            RichText::new(
+                "Once the CPU (or GPU) cools off into this range, the idle look kicks in; \
+                 the moment it heats past it, the normal effect returns.",
+            )
+            .small()
+            .color(theme::TEXT_DIM),
+        );
+        if !s.idle_enabled {
+            return;
+        }
+        ui.add_space(4.0);
+        ui.add(
+            egui::Slider::new(&mut s.idle_temp_min, 0.0..=100.0)
+                .text("From")
+                .suffix(" °C"),
+        )
+        .on_hover_text("The bottom of the idle range.");
+        ui.add(
+            egui::Slider::new(&mut s.idle_temp_max, 5.0..=110.0)
+                .text("To")
+                .suffix(" °C"),
+        )
+        .on_hover_text("The top of the idle range. Tip: GPUs idle cooler than CPUs — start from 0 °C if you want GPU zones to idle too.");
+        if s.idle_temp_max <= s.idle_temp_min + 1.0 {
+            s.idle_temp_max = s.idle_temp_min + 1.0;
+        }
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Idle look");
+            let selected = if let Some(name) = &s.idle_custom_effect {
+                format!("★ {name}")
+            } else {
+                s.idle_effect.label().to_string()
+            };
+            let custom_names: Vec<String> = s.custom_effects.iter().map(|f| f.name.clone()).collect();
+            egui::ComboBox::from_id_salt("idle_effect")
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for mode in EffectsMode::ALL {
+                        let is = s.idle_custom_effect.is_none() && s.idle_effect == mode;
+                        if ui.selectable_label(is, mode.label()).clicked() {
+                            s.idle_effect = mode;
+                            s.idle_custom_effect = None;
+                        }
+                    }
+                    for name in &custom_names {
+                        let is = s.idle_custom_effect.as_deref() == Some(name.as_str());
+                        if ui.selectable_label(is, format!("★ {name}")).clicked() {
+                            s.idle_custom_effect = Some(name.clone());
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Any builtin effect or one of your ★ Effect Lab creations.");
+        });
+    });
 }
 
 fn effect_tuning_card(app: &mut App, ui: &mut egui::Ui) {
@@ -629,6 +709,7 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
         "⚙ Advanced Settings",
         "Animation performance, smoothing feel, and power safety.",
     );
+    ui.spacing_mut().slider_width = (ui.available_width() * 0.4).clamp(140.0, 240.0);
 
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("Animation Engine").strong());
