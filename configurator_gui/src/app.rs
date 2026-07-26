@@ -70,7 +70,9 @@ struct SetupState {
 impl SetupState {
     fn new() -> SetupState {
         SetupState {
-            openrgb_connected: false,
+            // Optimistic until the first scan says otherwise — avoids a
+            // one-second "not reachable" flash on every healthy launch.
+            openrgb_connected: true,
             openrgb_path: util::find_openrgb(),
             afterburner_ok: util::afterburner_running(),
             installing: None,
