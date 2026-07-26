@@ -255,11 +255,16 @@ impl App {
                         .min_size(egui::vec2(140.0, 34.0));
                         if ui
                             .add(apply)
-                            .on_hover_text("Writes settings.json for the daemon and closes the configurator cleanly.")
+                            .on_hover_text("Saves, makes sure the daemon is running, and slips into the tray — your lights keep going. Quit fully from the tray menu.")
                             .clicked()
                             && self.save_settings()
                         {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            let _ = util::spawn_daemon();
+                            if self._tray.is_some() {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                            } else {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                            }
                         }
 
                         let run_bg = egui::Button::new(RichText::new("🚀 Run in Background"))
