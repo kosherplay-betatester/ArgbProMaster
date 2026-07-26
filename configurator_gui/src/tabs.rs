@@ -35,33 +35,40 @@ pub fn presets_tab(app: &mut App, ui: &mut egui::Ui) {
                     frame = frame.stroke(egui::Stroke::new(1.5, theme::ACCENT));
                 }
                 frame.show(ui, |ui| {
-                    ui.set_width(card_w);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(preset.emoji).size(22.0));
-                        ui.label(RichText::new(preset.name).strong().size(16.0));
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                if active {
-                                    theme::chip(ui, "ACTIVE", theme::ACCENT);
-                                }
-                            },
+                    // The frame sits inside a horizontal row, so its ui
+                    // inherits left-to-right flow — without this explicit
+                    // vertical layout the card's rows all render on one line
+                    // and blow past the window edge.
+                    ui.vertical(|ui| {
+                        ui.set_width(card_w);
+                        ui.set_max_width(card_w);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(preset.emoji).size(22.0));
+                            ui.label(RichText::new(preset.name).strong().size(16.0));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if active {
+                                        theme::chip(ui, "ACTIVE", theme::ACCENT);
+                                    }
+                                },
+                            );
+                        });
+                        ui.label(
+                            RichText::new(preset.tagline)
+                                .small()
+                                .color(theme::TEXT_DIM),
                         );
+                        ui.add_space(4.0);
+                        swatch_bar(ui, &preset.swatch);
+                        ui.add_space(6.0);
+                        let btn = ui
+                            .button(if active { "Re-apply" } else { "Apply Preset" })
+                            .on_hover_text("Loads this preset into the editor. Nothing touches your LEDs until you hit Apply & Save.");
+                        if btn.clicked() {
+                            to_apply = Some(preset.name);
+                        }
                     });
-                    ui.label(
-                        RichText::new(preset.tagline)
-                            .small()
-                            .color(theme::TEXT_DIM),
-                    );
-                    ui.add_space(4.0);
-                    swatch_bar(ui, &preset.swatch);
-                    ui.add_space(6.0);
-                    let btn = ui
-                        .button(if active { "Re-apply" } else { "Apply Preset" })
-                        .on_hover_text("Loads this preset into the editor. Nothing touches your LEDs until you hit Apply & Save.");
-                    if btn.clicked() {
-                        to_apply = Some(preset.name);
-                    }
                 });
             }
         });
@@ -533,9 +540,9 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
     });
 
     ui.add_space(8.0);
-    effect_tuning_card(app, ui);
-    ui.add_space(8.0);
     idle_effect_card(app, ui);
+    ui.add_space(8.0);
+    effect_tuning_card(app, ui);
 }
 
 /// 😴 Idle Effect: a calmer look that kicks in while temps rest in a range.

@@ -340,7 +340,8 @@ impl App {
                     );
                 });
                 ui.add_space(6.0);
-                ui.horizontal(|ui| {
+                // Wrapped so all five tabs stay reachable on narrow windows.
+                ui.horizontal_wrapped(|ui| {
                     for (tab, label) in Tab::ALL {
                         let selected = self.tab == tab;
                         let text = if selected {

@@ -110,7 +110,9 @@ fn simulator_card(app: &mut App, ui: &mut egui::Ui) {
                 .color(theme::TEXT_DIM),
         );
         ui.add_space(4.0);
-        ui.spacing_mut().slider_width = 200.0;
+        // Leave room for the value box and the CPU/GPU label so nothing clips
+        // at the panel edge.
+        ui.spacing_mut().slider_width = (ui.available_width() - 150.0).clamp(110.0, 190.0);
         ui.add(
             egui::Slider::new(&mut app.sim_cpu, 20.0..=105.0)
                 .text("CPU")
