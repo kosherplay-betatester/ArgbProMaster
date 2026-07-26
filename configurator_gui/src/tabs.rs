@@ -787,15 +787,32 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
         });
         ui.separator();
         ui.horizontal(|ui| {
+            let fixit = egui::Button::new(
+                RichText::new("🔧 Fix My RGB").strong().color(Color32::BLACK),
+            )
+            .fill(theme::ACCENT)
+            .corner_radius(CornerRadius::same(8));
+            if ui
+                .add(fixit)
+                .on_hover_text(
+                    "One click back to a known-good state: stock settings, every detected zone \
+                     switched on, Thermal Alert applied, daemon running. Then shape it at will.",
+                )
+                .clicked()
+            {
+                app.fix_my_rgb();
+            }
             if ui
                 .add(egui::Button::new(RichText::new("♻ Reset All to Defaults").color(theme::DANGER)))
-                .on_hover_text("Restores every APP setting to factory defaults (custom presets are kept). Your LEDs keep following the daemon — use the button beside this one to hand them back to the hardware.")
+                .on_hover_text("Restores every APP setting to factory defaults. Your zone setup and custom presets are kept.")
                 .clicked()
             {
                 let kept = app.settings.custom_presets.clone();
+                let kept_zones = app.settings.zones.clone();
                 app.settings = Settings::default();
                 app.settings.custom_presets = kept;
-                app.toast("Settings reset to defaults (custom presets kept).".to_string(), theme::WARN);
+                app.settings.zones = kept_zones;
+                app.toast("Settings reset to defaults (zones and custom presets kept).".to_string(), theme::WARN);
             }
             let restoring = app.restore_running();
             if ui

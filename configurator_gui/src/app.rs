@@ -175,6 +175,39 @@ impl App {
         self.restore_rx.is_some()
     }
 
+    /// 🔧 The panic button: put EVERYTHING back into a known-good, working
+    /// state — stock settings, every detected zone switched on, Thermal Alert
+    /// applied, daemon running. From there the user shapes it at will.
+    pub fn fix_my_rgb(&mut self) {
+        let kept_presets = self.settings.custom_presets.clone();
+        let kept_zones = self.settings.zones.clone();
+        self.settings = Settings::default();
+        self.settings.custom_presets = kept_presets;
+        self.settings.zones = kept_zones;
+        let mut enabled = 0usize;
+        for zone in self.settings.zones.iter_mut() {
+            zone.effect_override = None;
+            zone.custom_effect = None;
+            zone.colors_override = None;
+            if zone.effective_leds() > 0 {
+                zone.enabled = true;
+                enabled += 1;
+            }
+        }
+        argb_core::presets::apply_builtin("Thermal Alert", &mut self.settings);
+        if self.save_settings() {
+            let _ = util::spawn_daemon();
+            self.start_detection();
+            self.toast(
+                format!(
+                    "🔧 Fixed! Stock defaults restored, {enabled} zone(s) switched on, daemon running — \
+                     Thermal Alert is live. Now shape it however you like."
+                ),
+                theme::OK,
+            );
+        }
+    }
+
     /// Kick off a background scan of the OpenRGB server. Runs on a thread so
     /// the UI never freezes; results are folded in by `poll_detection`.
     pub fn start_detection(&mut self) {

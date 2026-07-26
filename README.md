@@ -44,6 +44,10 @@ dark-themed GUI whose live preview is **pixel-identical** to what your LEDs do.
 - 🚑 **Built-in setup assistant** — the app detects missing requirements and
   offers to fix them itself: one click installs OpenRGB or MSI Afterburner
   (via winget) and starts OpenRGB with the right flags automatically.
+- 🔧 **Fix My RGB** — a panic button (⚙ Advanced) that returns everything to a
+  known-good state: stock settings, every detected zone switched on, Thermal
+  Alert live, daemon running. Its sibling "💡 Restore original lighting" hands
+  every device back to its own built-in firmware effect instead.
 - 🪶 **Tiny and honest** — native Rust, no Electron. Measured on a Ryzen
   7950X3D: the daemon streams 168 LEDs at 30 FPS using **0.024% CPU and
   4.7 MB RAM**. Identical frames are deduplicated (a static look costs zero
