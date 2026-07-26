@@ -50,7 +50,40 @@ pub struct App {
     // settings.json mtime, so tray quick-switches (which write the file
     // directly) refresh the editor instead of being clobbered by stale state
     settings_stamp: Option<std::time::SystemTime>,
+    // setup assistant: detect + offer to install/start missing software
+    setup: SetupState,
     _tray: Option<tray::Tray>,
+}
+
+/// What the setup assistant currently knows about the software around us.
+struct SetupState {
+    openrgb_connected: bool,
+    openrgb_path: Option<std::path::PathBuf>,
+    afterburner_ok: bool,
+    installing: Option<&'static str>,
+    install_rx: Option<mpsc::Receiver<(&'static str, Result<(), String>)>>,
+    /// Re-run zone detection shortly after we auto-start OpenRGB.
+    reprobe_at: Option<Instant>,
+    dismissed: bool,
+}
+
+impl SetupState {
+    fn new() -> SetupState {
+        SetupState {
+            openrgb_connected: false,
+            openrgb_path: util::find_openrgb(),
+            afterburner_ok: util::afterburner_running(),
+            installing: None,
+            install_rx: None,
+            reprobe_at: None,
+            dismissed: false,
+        }
+    }
+
+    fn needs_attention(&self) -> bool {
+        !self.dismissed
+            && (self.installing.is_some() || !self.openrgb_connected || !self.afterburner_ok)
+    }
 }
 
 impl App {
@@ -84,6 +117,7 @@ impl App {
             daemon_running: argb_core::win::daemon_running(),
             last_daemon_check: Instant::now(),
             settings_stamp: argb_core::settings::settings_mtime(),
+            setup: SetupState::new(),
             _tray: tray,
         }
     }
@@ -117,6 +151,7 @@ impl App {
         self.detect_rx = None;
         match result {
             Ok(detected) => {
+                self.setup.openrgb_connected = true;
                 self.detected_devices = detected.iter().map(|d| d.device_name.clone()).collect();
                 let clean_before = self.settings == self.saved;
                 argb_core::zones::merge(&mut self.settings.zones, &detected);
@@ -135,11 +170,125 @@ impl App {
                     theme::OK,
                 );
             }
-            Err(e) => self.toast(
-                format!("Couldn't scan for zones: {e}. Is OpenRGB running with its SDK server on?"),
-                theme::WARN,
-            ),
+            Err(e) => {
+                self.setup.openrgb_connected = false;
+                self.setup.openrgb_path = util::find_openrgb();
+                self.toast(
+                    format!("Couldn't scan for zones: {e}. Is OpenRGB running with its SDK server on?"),
+                    theme::WARN,
+                );
+            }
         }
+    }
+
+    /// The setup assistant banner: shows what's missing and fixes it in one
+    /// click — install via winget, or start OpenRGB with the right flags.
+    fn setup_banner(&mut self, ctx: &egui::Context) {
+        // Fold in finished installs.
+        if let Some(rx) = &self.setup.install_rx {
+            if let Ok((name, result)) = rx.try_recv() {
+                self.setup.install_rx = None;
+                self.setup.installing = None;
+                match result {
+                    Ok(()) => {
+                        self.toast(format!("{name} installed! Setting it up…"), theme::OK);
+                        self.setup.openrgb_path = util::find_openrgb();
+                        if name == "OpenRGB" {
+                            if let Some(path) = self.setup.openrgb_path.clone() {
+                                let _ = util::start_openrgb(&path);
+                                self.setup.reprobe_at = Some(Instant::now() + Duration::from_secs(10));
+                            }
+                        } else if let Some(path) = util::find_afterburner() {
+                            let _ = util::start_afterburner(&path);
+                        }
+                    }
+                    Err(e) => self.toast(
+                        format!("{name} install didn't finish: {e}. You can install it manually and click Detect."),
+                        theme::DANGER,
+                    ),
+                }
+            }
+        }
+        // Re-probe after we auto-started OpenRGB.
+        if let Some(at) = self.setup.reprobe_at {
+            if Instant::now() >= at {
+                self.setup.reprobe_at = None;
+                self.start_detection();
+            }
+        }
+
+        if !self.setup.needs_attention() {
+            return;
+        }
+        egui::TopBottomPanel::top("setup_banner")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::CARD)
+                    .inner_margin(Margin::symmetric(16, 8)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(name) = self.setup.installing {
+                        ui.spinner();
+                        ui.label(
+                            RichText::new(format!(
+                                "Installing {name} for you — this can take a minute or two…"
+                            ))
+                            .color(theme::ACCENT),
+                        );
+                        return;
+                    }
+                    if !self.setup.openrgb_connected {
+                        ui.label(RichText::new("⚡").size(16.0));
+                        if self.setup.openrgb_path.is_none() {
+                            ui.label("OpenRGB isn't installed — it's the engine that talks to your LEDs. I can install and set it up for you.");
+                            if ui.button("🚀 Install OpenRGB for me").on_hover_text("Installs OpenRGB via winget, then starts it with the SDK server on — fully automatic.").clicked() {
+                                let (tx, rx) = mpsc::channel();
+                                self.setup.install_rx = Some(rx);
+                                self.setup.installing = Some("OpenRGB");
+                                util::winget_install("OpenRGB.OpenRGB", "OpenRGB", tx);
+                            }
+                        } else {
+                            ui.label("OpenRGB is installed but not reachable — one click starts it correctly (SDK server on, admin).");
+                            if ui.button("▶ Start OpenRGB for me").on_hover_text("Launches OpenRGB with --server --startminimized. Click Yes on the Windows prompt.").clicked() {
+                                if let Some(path) = self.setup.openrgb_path.clone() {
+                                    match util::start_openrgb(&path) {
+                                        Ok(()) => {
+                                            self.toast("Starting OpenRGB — rescanning your zones in a few seconds…".to_string(), theme::OK);
+                                            self.setup.reprobe_at = Some(Instant::now() + Duration::from_secs(8));
+                                        }
+                                        Err(e) => self.toast(format!("Couldn't start OpenRGB: {e}"), theme::DANGER),
+                                    }
+                                }
+                            }
+                        }
+                    } else if !self.setup.afterburner_ok {
+                        ui.label(RichText::new("🌡").size(16.0));
+                        if let Some(path) = util::find_afterburner() {
+                            ui.label("MSI Afterburner isn't running — without it, temperatures can't update.");
+                            if ui.button("▶ Start MSI Afterburner").clicked() {
+                                match util::start_afterburner(&path) {
+                                    Ok(()) => self.toast("Starting MSI Afterburner…".to_string(), theme::OK),
+                                    Err(e) => self.toast(format!("Couldn't start Afterburner: {e}"), theme::DANGER),
+                                }
+                            }
+                        } else {
+                            ui.label("MSI Afterburner isn't installed — it provides the CPU/GPU temperatures. I can install it for you.");
+                            if ui.button("🚀 Install Afterburner for me").on_hover_text("Installs MSI Afterburner via winget and starts it — fully automatic.").clicked() {
+                                let (tx, rx) = mpsc::channel();
+                                self.setup.install_rx = Some(rx);
+                                self.setup.installing = Some("MSI Afterburner");
+                                util::winget_install("Guru3D.Afterburner", "MSI Afterburner", tx);
+                            }
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("✕").on_hover_text("Hide this helper for now.").clicked() {
+                            self.setup.dismissed = true;
+                        }
+                    });
+                });
+            });
     }
 
     fn save_settings(&mut self) -> bool {
@@ -321,6 +470,7 @@ impl eframe::App for App {
         if self.last_daemon_check.elapsed() > Duration::from_millis(1500) {
             self.last_daemon_check = Instant::now();
             self.daemon_running = argb_core::win::daemon_running();
+            self.setup.afterburner_ok = util::afterburner_running();
         }
 
         // First frame: quietly scan for zones so new users see their hardware
@@ -333,6 +483,7 @@ impl eframe::App for App {
         self.reload_if_changed_on_disk();
 
         self.top_bar(ctx);
+        self.setup_banner(ctx);
         self.bottom_bar(ctx);
         preview::show(self, ctx);
 

@@ -37,12 +37,24 @@ dark-themed GUI whose live preview is **pixel-identical** to what your LEDs do.
 - 🖥 **Live preview with a thermal simulator** — drag mock CPU/GPU sliders to
   see a 95 °C meltdown without heating your PC.
 - 🔔 **Tray quick menu** — switch effects on the fly, without opening the window.
-- 🪶 **Tiny and honest** — native Rust, no Electron, a few MB of RAM. The daemon
-  hot-reloads `settings.json` the instant you press Save.
+- 🚑 **Built-in setup assistant** — the app detects missing requirements and
+  offers to fix them itself: one click installs OpenRGB or MSI Afterburner
+  (via winget) and starts OpenRGB with the right flags automatically.
+- 🪶 **Tiny and honest** — native Rust, no Electron. Measured on a Ryzen
+  7950X3D: the daemon streams 168 LEDs at 30 FPS using **0.024% CPU and
+  4.7 MB RAM**. Identical frames are deduplicated (a static look costs zero
+  traffic), settings hot-reload atomically, and any crash logs its own cause.
 
 ---
 
 ## Installation
+
+**The short version:** get ArgbProMaster (Step 3), run `configurator_gui.exe`,
+and let the **built-in setup assistant** do the rest — if OpenRGB or MSI
+Afterburner is missing or not running, a banner at the top of the window
+offers to **install and configure them for you automatically** (one click,
+uses winget). The steps below are the manual path if you prefer doing it
+yourself or something goes sideways.
 
 ### Step 1 — Install OpenRGB (required)
 
