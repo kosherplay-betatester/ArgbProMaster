@@ -35,7 +35,8 @@ dark-themed GUI whose live preview is **pixel-identical** to what your LEDs do.
   Smooth Spectrum Wave — plus named custom presets that snapshot your entire
   setup.
 - 🖥 **Live preview with a thermal simulator** — drag mock CPU/GPU sliders to
-  see a 95 °C meltdown without heating your PC.
+  see a 95 °C meltdown without heating your PC, or tick **📡 Follow real
+  temperatures** and the preview animates in perfect lockstep with your LEDs.
 - 😴 **Idle Effect** — pick a temperature range (say 35–50 °C) and a calmer
   look: the moment a zone's sensor cools into the range, the idle effect kicks
   in (any builtin or your own ★ creation); heat back up and the normal effect
@@ -145,7 +146,7 @@ within a second, live.
 | 🔌 **Zones & Ports** | Everything OpenRGB detected. Per zone: enable, LED count, CPU/GPU source, its own effect (builtin or ★ custom), its own colors. |
 | 🌡 **Thermal Curves** | The temperature window per sensor (e.g. 40–85 °C), the global cold→warm→hot colors, the global effect, the 🎛 per-effect tuning card (Speed / Intensity / Style), and the 😴 Idle Effect (range + look shown while temps rest). |
 | 🧪 **Effect Lab** | Build, edit and manage your own ★ effects with a live preview. |
-| ⚙ **Advanced** | Animation FPS, easing, brightness with a 70% Safety Power Lock, daemon start/stop, and **Reset All to Defaults**. |
+| ⚙ **Advanced** | Animation FPS, easing, brightness with a 70% Safety Power Lock, daemon start/stop, and the safety net: **🔧 Fix My RGB** (one click back to a known-good working state), **♻ Reset All to Defaults** (settings only — zones and custom presets survive), **💡 Restore original lighting** (hand every device back to its built-in firmware effect). |
 
 **Tray icon:** left-click opens the window; right-click gives you 🎨 *Quick
 Effect* (instant switching), *Quit (lights keep running)* and *⏹ Stop lights &
@@ -157,6 +158,7 @@ quit*.
 
 | Symptom | Fix |
 |---|---|
+| **Anything feels broken** | ⚙ Advanced → **🔧 Fix My RGB** — stock settings, zones on, daemon running, Thermal Alert live. |
 | **No zones found** | OpenRGB isn't running, or its SDK server is off (Step 1.4). Click "🔄 Detect zones" after fixing. |
 | **RAM sticks missing** | OpenRGB needs to run **as administrator** with the PawnIO driver installed. |
 | **LEDs frozen / dark after closing everything** | Devices sit in "Direct" mode showing the last streamed frame. Start the daemon again, or set a hardware mode in OpenRGB and use its "Save to device". |
