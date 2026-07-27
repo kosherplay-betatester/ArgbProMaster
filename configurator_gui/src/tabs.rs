@@ -372,6 +372,30 @@ fn zone_row(
     colors_override_editor(ui, &mut zone.colors_override, global_colors, &salt);
 }
 
+/// Paint a multi-stop gradient as a horizontal bar (sorted copy).
+fn stops_bar(ui: &mut egui::Ui, stops: &[(f32, [u8; 3])]) {
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
+    let painter = ui.painter();
+    let mut sorted = stops.to_vec();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    const STEPS: usize = 48;
+    let step_w = rect.width() / STEPS as f32;
+    for i in 0..STEPS {
+        let t = i as f32 / (STEPS - 1) as f32;
+        let c = argb_core::engine::palette_color(&sorted, t);
+        let x0 = rect.left() + i as f32 * step_w;
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(x0, rect.top()),
+                egui::pos2(x0 + step_w + 0.5, rect.bottom()),
+            ),
+            CornerRadius::ZERO,
+            Color32::from_rgb(c[0] as u8, c[1] as u8, c[2] as u8),
+        );
+    }
+}
+
 /// Effect picker for one zone: follow global, any builtin, or a ★ custom.
 fn zone_effect_combo(ui: &mut egui::Ui, zone: &mut ZoneConfig, custom_names: &[String], salt: &str) {
     let label = if let Some(name) = &zone.custom_effect {
@@ -498,21 +522,62 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
                 .color(theme::TEXT_DIM),
         );
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Cold");
-            ui.color_edit_button_srgb(&mut s.colors.cold_color)
-                .on_hover_text("Color when the system is chilling at the bottom of the range.");
-            ui.add_space(10.0);
-            ui.label("Warm");
-            ui.color_edit_button_srgb(&mut s.colors.warm_color)
-                .on_hover_text("Color at the midpoint of the temperature range.");
-            ui.add_space(10.0);
-            ui.label("Hot");
-            ui.color_edit_button_srgb(&mut s.colors.hot_color)
-                .on_hover_text("Color when temperatures hit the top of the range.");
-        });
-        ui.add_space(6.0);
-        theme::gradient_bar(ui, &s.colors, 18.0);
+
+        let mut multi = !s.global_stops.is_empty();
+        if ui
+            .checkbox(&mut multi, "🌈 Custom multi-color journey")
+            .on_hover_text("Up to 8 color stops instead of the classic 3 — place any color anywhere along the temperature range.")
+            .changed()
+        {
+            s.global_stops = if multi { s.colors.stops() } else { Vec::new() };
+        }
+
+        if multi {
+            let mut remove: Option<usize> = None;
+            let count = s.global_stops.len();
+            for (i, stop) in s.global_stops.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.color_edit_button_srgb(&mut stop.1)
+                        .on_hover_text("The color at this point of the journey.");
+                    let mut pct = stop.0 * 100.0;
+                    if ui
+                        .add(egui::Slider::new(&mut pct, 0.0..=100.0).custom_formatter(|v, _| format!("{v:.0}%")))
+                        .on_hover_text("Where along the cold→hot journey this color sits.")
+                        .changed()
+                    {
+                        stop.0 = pct / 100.0;
+                    }
+                    if count > 2 && ui.button("✖").on_hover_text("Remove this color stop.").clicked() {
+                        remove = Some(i);
+                    }
+                });
+            }
+            if let Some(i) = remove {
+                s.global_stops.remove(i);
+            }
+            if s.global_stops.len() < 8 && ui.button("＋ Add color stop").clicked() {
+                let last = s.global_stops.last().copied().unwrap_or((0.5, [255, 255, 255]));
+                s.global_stops.push(((last.0 + 1.0) / 2.0, last.1));
+            }
+            ui.add_space(4.0);
+            stops_bar(ui, &s.global_stops);
+        } else {
+            ui.horizontal(|ui| {
+                ui.label("Cold");
+                ui.color_edit_button_srgb(&mut s.colors.cold_color)
+                    .on_hover_text("Color when the system is chilling at the bottom of the range.");
+                ui.add_space(10.0);
+                ui.label("Warm");
+                ui.color_edit_button_srgb(&mut s.colors.warm_color)
+                    .on_hover_text("Color at the midpoint of the temperature range.");
+                ui.add_space(10.0);
+                ui.label("Hot");
+                ui.color_edit_button_srgb(&mut s.colors.hot_color)
+                    .on_hover_text("Color when temperatures hit the top of the range.");
+            });
+            ui.add_space(6.0);
+            theme::gradient_bar(ui, &s.colors, 18.0);
+        }
         ui.add_space(8.0);
 
         ui.label(RichText::new("Global Effect").strong());
@@ -632,6 +697,57 @@ fn idle_effect_card(app: &mut App, ui: &mut egui::Ui) {
                 .response
                 .on_hover_text("Any builtin effect or one of your ★ Effect Lab creations.");
         });
+
+        ui.add_space(4.0);
+        let mut own_colors = s.idle_colors.is_some();
+        if ui
+            .checkbox(&mut own_colors, "Custom colors for the idle look")
+            .on_hover_text("Give idle its own cold/warm/hot colors — e.g. dim blues while resting, without touching your main gradient.")
+            .changed()
+        {
+            s.idle_colors = if own_colors { Some(s.colors) } else { None };
+        }
+        if let Some(colors) = &mut s.idle_colors {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Cold").small());
+                ui.color_edit_button_srgb(&mut colors.cold_color);
+                ui.label(RichText::new("Warm").small());
+                ui.color_edit_button_srgb(&mut colors.warm_color);
+                ui.label(RichText::new("Hot").small());
+                ui.color_edit_button_srgb(&mut colors.hot_color);
+            });
+        }
+
+        let mut own_pace = s.idle_tuning.is_some();
+        if ui
+            .checkbox(&mut own_pace, "Custom speed && intensity for the idle look")
+            .on_hover_text("Idle usually wants to be slower and softer than the normal effect — tune it here without touching the effect's global tuning.")
+            .changed()
+        {
+            s.idle_tuning = if own_pace {
+                Some(argb_core::settings::EffectTuning {
+                    speed: 0.5,
+                    intensity: 0.35,
+                    ..s.tuning(s.idle_effect)
+                })
+            } else {
+                None
+            };
+        }
+        if let Some(tuning) = &mut s.idle_tuning {
+            ui.add(
+                egui::Slider::new(&mut tuning.speed, 0.25..=3.0)
+                    .custom_formatter(|v, _| format!("{v:.2}×"))
+                    .text("Idle speed"),
+            )
+            .on_hover_text("How fast the idle animation moves. 0.5× makes a lovely calm resting state.");
+            ui.add(
+                egui::Slider::new(&mut tuning.intensity, 0.0..=1.0)
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .text("Idle intensity"),
+            )
+            .on_hover_text("How pronounced the idle animation is — lower = softer, dreamier.");
+        }
     });
 }
 

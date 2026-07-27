@@ -91,7 +91,7 @@ fn flicker(i: usize, ft: f32) -> f32 {
 /// * `tuning` — per-effect speed/intensity/variant; defaults keep stock looks.
 pub fn render_zone(
     mode: EffectsMode,
-    colors: &ColorConfig,
+    stops: &[(f32, [u8; 3])],
     led_count: usize,
     time: f64,
     temp: f32,
@@ -111,7 +111,7 @@ pub fn render_zone(
 
     match mode {
         EffectsMode::Solid => {
-            let px = finish(thermal_color(colors, temp), brightness);
+            let px = finish(palette_color(stops, temp), brightness);
             out.resize(led_count, px);
         }
         EffectsMode::Breathing => {
@@ -129,7 +129,7 @@ pub fn render_zone(
                 }
                 _ => floor + (1.0 - floor) * (0.5 + 0.5 * (t * freq).sin()),
             };
-            let px = finish(thermal_color(colors, temp), brightness * breath);
+            let px = finish(palette_color(stops, temp), brightness * breath);
             out.resize(led_count, px);
         }
         EffectsMode::ThermalWave => {
@@ -145,7 +145,7 @@ pub fn render_zone(
                         let wave = ((i as f32 / n) * tau * 1.5 - t * speed).sin();
                         let ti = (temp + wave * spread).clamp(0.0, 1.0);
                         let level = (1.0 - shimmer) + shimmer * (0.5 + 0.5 * wave);
-                        out.push(finish(thermal_color(colors, ti), brightness * level));
+                        out.push(finish(palette_color(stops, ti), brightness * level));
                     }
                 }
                 // Lava Sea: three layered traveling waves with incommensurate
@@ -162,7 +162,7 @@ pub fn render_zone(
                         let ti = (temp + blend * spread).clamp(0.0, 1.0);
                         let mix = 0.5 + 0.5 * (0.8 * swell + 0.2 * ripple);
                         let level = (1.0 - shimmer) + shimmer * mix;
-                        out.push(finish(thermal_color(colors, ti), brightness * level));
+                        out.push(finish(palette_color(stops, ti), brightness * level));
                     }
                 }
             }
@@ -176,7 +176,7 @@ pub fn render_zone(
             for i in 0..led_count {
                 let g = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
                 let ti = g * temp;
-                out.push(finish(thermal_color(colors, ti), brightness * pulse));
+                out.push(finish(palette_color(stops, ti), brightness * pulse));
             }
         }
         EffectsMode::SpectrumWave => {
@@ -203,7 +203,7 @@ pub fn render_zone(
                     level = 1.0;
                     ti = (ti + 0.30).min(1.0);
                 }
-                out.push(finish(thermal_color(colors, ti), brightness * level));
+                out.push(finish(palette_color(stops, ti), brightness * level));
             }
         }
         EffectsMode::AuroraDrift => {
@@ -220,7 +220,7 @@ pub fn render_zone(
                 }
                 let ti = (temp + blend * spread).clamp(0.0, 1.0);
                 let level = 0.70 + 0.30 * (0.5 + 0.5 * w1);
-                out.push(finish(thermal_color(colors, ti), brightness * level));
+                out.push(finish(palette_color(stops, ti), brightness * level));
             }
         }
         EffectsMode::CometChase => {
@@ -240,7 +240,7 @@ pub fn render_zone(
                     glow = glow.max((-d2 / tail).exp());
                 }
                 let level = 0.06 + 0.94 * glow;
-                out.push(finish(thermal_color(colors, temp), brightness * level));
+                out.push(finish(palette_color(stops, temp), brightness * level));
             }
         }
         EffectsMode::ThermalFill => {
@@ -259,7 +259,7 @@ pub fn render_zone(
                 let ti = (pos / fill).clamp(0.0, 1.0) * temp;
                 let head = (1.0 - ((pos - fill).abs() / soft).min(1.0)) * head_pulse;
                 let level = 0.04 + 0.96 * lit.max(head * 0.9);
-                out.push(finish(thermal_color(colors, ti), brightness * level));
+                out.push(finish(palette_color(stops, ti), brightness * level));
             }
         }
         EffectsMode::MeteorShower => {
@@ -279,7 +279,7 @@ pub fn render_zone(
                     glow = glow.max((-d / tail).exp());
                 }
                 let level = 0.05 + 0.95 * glow.min(1.0);
-                out.push(finish(thermal_color(colors, temp), brightness * level));
+                out.push(finish(palette_color(stops, temp), brightness * level));
             }
         }
         EffectsMode::LarsonScanner => {
@@ -296,7 +296,7 @@ pub fn render_zone(
                     glow = glow.max((-((x - (1.0 - pos)) / width).powi(2)).exp());
                 }
                 let level = 0.05 + 0.95 * glow;
-                out.push(finish(thermal_color(colors, temp), brightness * level));
+                out.push(finish(palette_color(stops, temp), brightness * level));
             }
         }
         EffectsMode::Plasma => {
@@ -310,7 +310,7 @@ pub fn render_zone(
                 }
                 let ti = (temp + swirl * spread).clamp(0.0, 1.0);
                 let level = 0.85 + 0.15 * (x * 3.7 + t * 0.91).sin().abs();
-                out.push(finish(thermal_color(colors, ti), brightness * level));
+                out.push(finish(palette_color(stops, ti), brightness * level));
             }
         }
         EffectsMode::StarfieldTwinkle => {
@@ -330,7 +330,7 @@ pub fn render_zone(
                     let d = (head - i as f32 / n).rem_euclid(1.0);
                     level = level.max(0.05 + 0.95 * (-d / 0.05).exp());
                 }
-                out.push(finish(thermal_color(colors, temp), brightness * level.min(1.0)));
+                out.push(finish(palette_color(stops, temp), brightness * level.min(1.0)));
             }
         }
         EffectsMode::LightTrail => {
@@ -373,7 +373,70 @@ pub fn render_zone(
                     level = (level * steps).round() / steps;
                 }
                 let ti = (temp * (0.25 + 0.75 * level)).clamp(0.0, 1.0);
-                out.push(finish(thermal_color(colors, ti), brightness * level));
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::Fireworks => {
+            // Rockets climb the strip, then burst into sparkles that fade.
+            // Heat launches more rockets; intensity sets burst size.
+            let rockets = if tuning.variant == 1 { 4 } else { 2 } + (temp * 3.0) as u32;
+            let cycle_rate = 0.35 + temp * 0.4;
+            let burst_size = 0.05 + 0.15 * k;
+            for i in 0..led_count {
+                let x = i as f32 / n;
+                let mut level: f32 = 0.02;
+                let mut ti = temp * 0.3;
+                for r in 0..rockets {
+                    let seed = hash01(r as f32 * 47.3);
+                    let phase = (t * cycle_rate * (0.7 + seed * 0.6) + seed).fract();
+                    let apex = 0.3 + hash01(r as f32 * 13.7 + (t * cycle_rate + seed).floor() * 7.1) * 0.65;
+                    if phase < 0.45 {
+                        // Ascent: a small bright dot climbing toward its apex.
+                        let pos = apex * (phase / 0.45);
+                        let glow = (-((x - pos) / 0.02).powi(2)).exp();
+                        if glow > level {
+                            level = glow;
+                            ti = temp;
+                        }
+                    } else {
+                        // Burst: sparkles around the apex, fading out.
+                        let age = (phase - 0.45) / 0.55;
+                        let d = (x - apex).abs();
+                        if d < burst_size {
+                            let sparkle = flicker(i, t * 6.0 + seed * 9.0);
+                            let glow = (1.0 - d / burst_size) * (1.0 - age) * (0.4 + 0.6 * sparkle);
+                            if glow > level {
+                                level = glow;
+                                ti = (temp + (1.0 - age) * 0.3).min(1.0);
+                            }
+                        }
+                    }
+                }
+                out.push(finish(palette_color(stops, ti), brightness * level.min(1.0)));
+            }
+        }
+        EffectsMode::WaveCollide => {
+            // Two pulses race in from the ends; where they meet, a splash.
+            let rate = 0.30 + temp * 0.45;
+            let phase = (t * rate).fract();
+            let width = 0.04 + 0.10 * k;
+            // Ping Pong: after colliding they bounce back out.
+            let p = if tuning.variant == 1 {
+                1.0 - (1.0 - 2.0 * phase).abs()
+            } else {
+                phase
+            };
+            let left = 0.5 * p;
+            let right = 1.0 - 0.5 * p;
+            let near = (right - left).abs().min(0.12);
+            let splash = 1.0 - near / 0.12; // brightest at the moment of collision
+            for i in 0..led_count {
+                let x = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
+                let g1 = (-((x - left) / width).powi(2)).exp();
+                let g2 = (-((x - right) / width).powi(2)).exp();
+                let level = 0.04 + 0.96 * (g1.max(g2) * (1.0 + splash * 0.6)).min(1.0);
+                let ti = (temp + splash * 0.25 * g1.max(g2)).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
             }
         }
         EffectsMode::RainDrops => {
@@ -393,7 +456,7 @@ pub fn render_zone(
                     glow = glow.max(ring * (1.0 - cycle));
                 }
                 let level = 0.07 + 0.93 * glow.min(1.0);
-                out.push(finish(thermal_color(colors, temp), brightness * level));
+                out.push(finish(palette_color(stops, temp), brightness * level));
             }
         }
     }
@@ -566,13 +629,29 @@ pub fn style_key(settings: &Settings, zone: &ZoneConfig, idle_active: bool) -> u
         } else {
             zone.effect_override.unwrap_or(settings.effects_mode)
         };
-        let colors = zone.colors_override.unwrap_or(settings.colors);
-        let tuning = settings.tuning(mode);
+        let stops = if idle_active {
+            match (settings.idle_colors, zone.colors_override) {
+                (Some(idle), _) => idle.stops(),
+                (None, Some(own)) => own.stops(),
+                (None, None) => settings.journey_stops(),
+            }
+        } else {
+            match zone.colors_override {
+                Some(own) => own.stops(),
+                None => settings.journey_stops(),
+            }
+        };
+        let tuning = if idle_active {
+            settings.idle_tuning.unwrap_or_else(|| settings.tuning(mode))
+        } else {
+            settings.tuning(mode)
+        };
         0u8.hash(&mut h);
         format!("{mode:?}").hash(&mut h);
-        colors.cold_color.hash(&mut h);
-        colors.warm_color.hash(&mut h);
-        colors.hot_color.hash(&mut h);
+        for (pos, color) in &stops {
+            pos.to_bits().hash(&mut h);
+            color.hash(&mut h);
+        }
         tuning.speed.to_bits().hash(&mut h);
         tuning.intensity.to_bits().hash(&mut h);
         tuning.variant.hash(&mut h);
@@ -612,20 +691,23 @@ pub fn render_zone_config(
     let temp = sources.norm[idx];
 
     // Idle mode: the calmer idle look, chosen with hysteresis by the caller.
+    // It can carry its own colors and pace, falling back to the zone's.
     if idle_active {
+        if let Some(fx) = settings
+            .idle_custom_effect
+            .as_deref()
+            .and_then(|name| settings.custom_effect(name))
         {
-            if let Some(fx) = settings
-                .idle_custom_effect
-                .as_deref()
-                .and_then(|name| settings.custom_effect(name))
-            {
-                return render_custom(fx, led_count, time, temp, settings.global_brightness);
-            }
-            let mode = settings.idle_effect;
-            let colors = zone.colors_override.unwrap_or(settings.colors);
-            let tuning = settings.tuning(mode);
-            return render_zone(mode, &colors, led_count, time, temp, settings.global_brightness, tuning);
+            return render_custom(fx, led_count, time, temp, settings.global_brightness);
         }
+        let mode = settings.idle_effect;
+        let stops = match (settings.idle_colors, zone.colors_override) {
+            (Some(idle), _) => idle.stops(),
+            (None, Some(own)) => own.stops(),
+            (None, None) => settings.journey_stops(),
+        };
+        let tuning = settings.idle_tuning.unwrap_or_else(|| settings.tuning(mode));
+        return render_zone(mode, &stops, led_count, time, temp, settings.global_brightness, tuning);
     }
 
     // Custom effect resolution: zone-level name, else the global custom
@@ -640,9 +722,12 @@ pub fn render_zone_config(
     }
 
     let mode = zone.effect_override.unwrap_or(settings.effects_mode);
-    let colors = zone.colors_override.unwrap_or(settings.colors);
+    let stops = match zone.colors_override {
+        Some(own) => own.stops(),
+        None => settings.journey_stops(),
+    };
     let tuning = settings.tuning(mode);
-    render_zone(mode, &colors, led_count, time, temp, settings.global_brightness, tuning)
+    render_zone(mode, &stops, led_count, time, temp, settings.global_brightness, tuning)
 }
 
 #[cfg(test)]
@@ -664,12 +749,12 @@ mod tests {
         for mode in EffectsMode::ALL {
             for variant in 0..mode.variant_labels().len().max(1) as u32 {
                 let tuning = EffectTuning { variant, ..EffectTuning::default() };
-                let frame = render_zone(mode, &c, 72, 1.25, 0.5, 0.0, tuning);
+                let frame = render_zone(mode, &c.stops(), 72, 1.25, 0.5, 0.0, tuning);
                 assert_eq!(frame.len(), 72);
                 assert!(frame.iter().all(|px| *px == [0, 0, 0]), "{mode:?} v{variant}");
             }
         }
-        let empty = render_zone(EffectsMode::Solid, &c, 0, 0.0, 0.0, 1.0, EffectTuning::default());
+        let empty = render_zone(EffectsMode::Solid, &c.stops(), 0, 0.0, 0.0, 1.0, EffectTuning::default());
         assert!(empty.is_empty());
     }
 
@@ -678,8 +763,8 @@ mod tests {
         let c = ColorConfig::default();
         for mode in EffectsMode::ALL {
             let t = EffectTuning::default();
-            let a = render_zone(mode, &c, 48, 3.7, 0.4, 0.8, t);
-            let b = render_zone(mode, &c, 48, 3.7, 0.4, 0.8, t);
+            let a = render_zone(mode, &c.stops(), 48, 3.7, 0.4, 0.8, t);
+            let b = render_zone(mode, &c.stops(), 48, 3.7, 0.4, 0.8, t);
             assert_eq!(a, b, "{mode:?} must render identically for equal inputs");
         }
     }
@@ -708,18 +793,20 @@ mod tests {
             EffectsMode::StarfieldTwinkle,
             EffectsMode::RainDrops,
             EffectsMode::LightTrail,
+            EffectsMode::Fireworks,
+            EffectsMode::WaveCollide,
         ] {
-            let base = render_zone(mode, &c, 60, 2.0, 0.5, 1.0, EffectTuning::default());
+            let base = render_zone(mode, &c.stops(), 60, 2.0, 0.5, 1.0, EffectTuning::default());
             let v1 = EffectTuning { variant: 1, ..EffectTuning::default() };
             assert_ne!(
                 base,
-                render_zone(mode, &c, 60, 2.0, 0.5, 1.0, v1),
+                render_zone(mode, &c.stops(), 60, 2.0, 0.5, 1.0, v1),
                 "{mode:?} variant 1 should look different"
             );
             let fast = EffectTuning { speed: 3.0, ..EffectTuning::default() };
             assert_ne!(
                 base,
-                render_zone(mode, &c, 60, 2.0, 0.5, 1.0, fast),
+                render_zone(mode, &c.stops(), 60, 2.0, 0.5, 1.0, fast),
                 "{mode:?} speed should shift the animation"
             );
         }
@@ -795,6 +882,35 @@ mod tests {
     }
 
     #[test]
+    fn multi_stop_journey_flows_into_rendering() {
+        use crate::settings::{Settings, ZoneConfig};
+        let mut s = Settings::default();
+        s.effects_mode = EffectsMode::Solid;
+        // A 5-stop journey; at t=0 Solid must show the first stop's color.
+        s.global_stops = vec![
+            (0.0, [10, 20, 30]),
+            (0.25, [0, 255, 0]),
+            (0.5, [255, 255, 0]),
+            (0.75, [255, 128, 0]),
+            (1.0, [255, 0, 0]),
+        ];
+        s.global_brightness = 1.0;
+        s.safety_power_lock = false;
+        let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
+        let sv = SourceValues { norm: [0.0; 6], raw: [20.0; 6] };
+        let frame = render_zone_config(&s, &zone, 2, 0.0, &sv, false);
+        assert_eq!(frame[0], [10, 20, 30]);
+        // Zones with their own colors ignore the global journey.
+        let own = ZoneConfig {
+            enabled: true,
+            colors_override: Some(crate::settings::ColorConfig::default()),
+            ..ZoneConfig::default()
+        };
+        let own_frame = render_zone_config(&s, &own, 2, 0.0, &sv, false);
+        assert_eq!(own_frame[0], [0, 255, 200]);
+    }
+
+    #[test]
     fn style_key_changes_only_when_the_look_changes() {
         use crate::settings::{Settings, ZoneConfig};
         let mut s = Settings::default();
@@ -841,7 +957,7 @@ mod tests {
         assert!(idle_wants(&s, &zone, &inside));
         assert!(!idle_wants(&s, &zone, &outside));
         let idle = render_zone_config(&s, &zone, 4, 4.9, &inside, true);
-        let solid = render_zone(EffectsMode::Solid, &s.colors, 4, 4.9, 0.3, s.global_brightness, EffectTuning::default());
+        let solid = render_zone(EffectsMode::Solid, &s.colors.stops(), 4, 4.9, 0.3, s.global_brightness, EffectTuning::default());
         assert_ne!(idle, solid, "with idle active the idle effect must render");
         // Idle inactive → the normal effect, regardless of the raw value.
         let normal = render_zone_config(&s, &zone, 4, 4.9, &outside, false);

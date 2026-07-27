@@ -21,10 +21,12 @@ pub enum EffectsMode {
     StarfieldTwinkle,
     RainDrops,
     LightTrail,
+    Fireworks,
+    WaveCollide,
 }
 
 impl EffectsMode {
-    pub const ALL: [EffectsMode; 15] = [
+    pub const ALL: [EffectsMode; 17] = [
         EffectsMode::ThermalWave,
         EffectsMode::ThermalFill,
         EffectsMode::GradientPulse,
@@ -40,6 +42,8 @@ impl EffectsMode {
         EffectsMode::StarfieldTwinkle,
         EffectsMode::RainDrops,
         EffectsMode::LightTrail,
+        EffectsMode::Fireworks,
+        EffectsMode::WaveCollide,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -59,6 +63,8 @@ impl EffectsMode {
             EffectsMode::StarfieldTwinkle => "Starfield Twinkle",
             EffectsMode::RainDrops => "Rain Drops",
             EffectsMode::LightTrail => "Light Trail",
+            EffectsMode::Fireworks => "Fireworks",
+            EffectsMode::WaveCollide => "Wave Collide",
         }
     }
 
@@ -79,6 +85,8 @@ impl EffectsMode {
             EffectsMode::StarfieldTwinkle => "A dark sky where stars twinkle in and out, colored by temperature.",
             EffectsMode::RainDrops => "Drops splash onto the strip and ripple outward before fading.",
             EffectsMode::LightTrail => "A glowing trail orbits the dark strip in endless circles — smooth gradient tail on both sides, colored by your scheme.",
+            EffectsMode::Fireworks => "Rockets shoot up the strip and burst into fading sparkles — more the hotter it gets.",
+            EffectsMode::WaveCollide => "Two pulses race in from the ends and splash bright where they collide.",
         }
     }
 
@@ -99,6 +107,8 @@ impl EffectsMode {
             EffectsMode::StarfieldTwinkle => &["Calm Stars", "Shooting Stars"],
             EffectsMode::RainDrops => &["Drizzle", "Storm"],
             EffectsMode::LightTrail => &["Single Trail", "Twin Trails"],
+            EffectsMode::Fireworks => &["Classic", "Grand Finale"],
+            EffectsMode::WaveCollide => &["Center Splash", "Ping Pong"],
             EffectsMode::GradientPulse | EffectsMode::Solid => &[],
         }
     }
@@ -231,6 +241,13 @@ impl Default for ColorConfig {
             warm_color: [180, 0, 255],
             hot_color: [255, 10, 10],
         }
+    }
+}
+
+impl ColorConfig {
+    /// The classic 3-color journey as gradient stops.
+    pub fn stops(&self) -> Vec<(f32, [u8; 3])> {
+        vec![(0.0, self.cold_color), (0.5, self.warm_color), (1.0, self.hot_color)]
     }
 }
 
@@ -471,6 +488,12 @@ pub struct PresetData {
     pub idle_effect: EffectsMode,
     #[serde(default)]
     pub idle_custom_effect: Option<String>,
+    #[serde(default)]
+    pub idle_colors: Option<ColorConfig>,
+    #[serde(default)]
+    pub idle_tuning: Option<EffectTuning>,
+    #[serde(default)]
+    pub global_stops: Vec<(f32, [u8; 3])>,
 }
 
 fn default_idle_min() -> f32 {
@@ -503,6 +526,9 @@ impl PresetData {
             idle_temp_max: s.idle_temp_max,
             idle_effect: s.idle_effect,
             idle_custom_effect: s.idle_custom_effect.clone(),
+            idle_colors: s.idle_colors,
+            idle_tuning: s.idle_tuning,
+            global_stops: s.global_stops.clone(),
         }
     }
 
@@ -524,6 +550,9 @@ impl PresetData {
         s.idle_temp_max = self.idle_temp_max;
         s.idle_effect = self.idle_effect;
         s.idle_custom_effect = self.idle_custom_effect.clone();
+        s.idle_colors = self.idle_colors;
+        s.idle_tuning = self.idle_tuning;
+        s.global_stops = self.global_stops.clone();
     }
 }
 
@@ -566,6 +595,15 @@ pub struct Settings {
     pub idle_effect: EffectsMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_custom_effect: Option<String>,
+    /// The idle look's own colors; None = the zone's normal colors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_colors: Option<ColorConfig>,
+    /// The idle look's own speed/intensity; None = the effect's global tuning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_tuning: Option<EffectTuning>,
+    /// Multi-stop Color Journey (2..=8 stops). Empty = use the classic
+    /// 3-color `colors` above. Zones with color overrides keep their own.
+    pub global_stops: Vec<(f32, [u8; 3])>,
 }
 
 /// Stock brightness, shared by `Settings::default` and the preset baseline
@@ -600,6 +638,9 @@ impl Default for Settings {
             idle_temp_max: 50.0,
             idle_effect: EffectsMode::Breathing,
             idle_custom_effect: None,
+            idle_colors: None,
+            idle_tuning: None,
+            global_stops: Vec::new(),
         }
     }
 }
@@ -628,6 +669,29 @@ impl Settings {
             self.idle_temp_max = self.idle_temp_min + 1.0;
         }
         self.idle_temp_max = self.idle_temp_max.clamp(1.0, 110.0);
+        if let Some(t) = self.idle_tuning {
+            self.idle_tuning = Some(t.clamped(self.idle_effect));
+        }
+        // Multi-stop journey: sorted, clamped, 2..=8 stops (or empty = off).
+        self.global_stops.truncate(8);
+        for stop in self.global_stops.iter_mut() {
+            stop.0 = stop.0.clamp(0.0, 1.0);
+        }
+        self.global_stops
+            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        if self.global_stops.len() == 1 {
+            self.global_stops.clear();
+        }
+    }
+
+    /// The gradient every zone WITHOUT a color override travels: the custom
+    /// multi-stop journey when configured, else the classic 3 colors.
+    pub fn journey_stops(&self) -> Vec<(f32, [u8; 3])> {
+        if self.global_stops.len() >= 2 {
+            self.global_stops.clone()
+        } else {
+            self.colors.stops()
+        }
     }
 
     /// Look up a custom effect by name.
