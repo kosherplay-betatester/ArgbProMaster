@@ -90,15 +90,15 @@ fn main() {
     let mut settings_stamp = argb_core::settings::settings_mtime();
 
     let mut mahm = MahmSource::new();
-    // Report the thermal sources once, so the log shows what was detected on
-    // this machine (works with any CPU/GPU vendor Afterburner supports).
-    let mut thermal_reported = false;
+    // Report the detected sources once, so the log shows what this machine
+    // provides (works with any CPU/GPU vendor Afterburner supports).
+    let mut sources_reported = false;
 
-    // Smoothed "working" temperatures, seeded at the cool end of the curves.
-    let mut cpu_work = settings.cpu_temp_min;
-    let mut gpu_work = settings.gpu_temp_min;
-    let mut cpu_target = cpu_work;
-    let mut gpu_target = gpu_work;
+    // Smoothed "working" values per source (TargetSource::index order:
+    // CPU °C, GPU °C, CPU load, GPU load, RAM %, FPS), seeded cool/quiet.
+    let mut work = [settings.cpu_temp_min, settings.gpu_temp_min, 0.0, 0.0, 0.0, 0.0];
+    let mut target = work;
+    let mut fps_scale = 240.0f32;
 
     let animation_start = Instant::now();
 
@@ -212,37 +212,48 @@ fn main() {
                 }
             }
 
-            // Pull fresh thermal targets when Afterburner is available.
-            if let Some(temps) = mahm.read() {
-                if !thermal_reported {
-                    thermal_reported = true;
-                    let show = |t: Option<f32>| match t {
-                        Some(v) => format!("found ({v:.0}\u{00B0}C)"),
-                        None => "not found".to_string(),
-                    };
+            // Pull fresh source targets when Afterburner is available.
+            if let Some(r) = mahm.read() {
+                if !sources_reported {
+                    sources_reported = true;
+                    let yn = |o: Option<f32>| if o.is_some() { "yes" } else { "no" };
                     note(&format!(
-                        "thermal sources detected via MSI Afterburner: CPU {} / GPU {}",
-                        show(temps.cpu),
-                        show(temps.gpu)
+                        "sources via MSI Afterburner: CPU temp {} / GPU temp {} / CPU load {} / GPU load {} / RAM {} / FPS {}",
+                        yn(r.cpu_temp), yn(r.gpu_temp), yn(r.cpu_load), yn(r.gpu_load), yn(r.ram_pct), yn(r.fps)
                     ));
                 }
-                if let Some(c) = temps.cpu {
-                    cpu_target = c;
+                for (slot, v) in [r.cpu_temp, r.gpu_temp, r.cpu_load, r.gpu_load, r.ram_pct, r.fps]
+                    .into_iter()
+                    .enumerate()
+                {
+                    if let Some(v) = v {
+                        target[slot] = v;
+                    }
                 }
-                if let Some(g) = temps.gpu {
-                    gpu_target = g;
+                if r.fps_max > 0.0 {
+                    fps_scale = r.fps_max;
                 }
             }
 
-            // Exponential smoothing for fluid transitions.
-            cpu_work += (cpu_target - cpu_work) * settings.smoothing_speed;
-            gpu_work += (gpu_target - gpu_work) * settings.smoothing_speed;
+            // Exponential smoothing for fluid transitions, per source.
+            for i in 0..work.len() {
+                work[i] += (target[i] - work[i]) * settings.smoothing_speed;
+            }
 
-            let cpu_norm = engine::normalize_temp(cpu_work, settings.cpu_temp_min, settings.cpu_temp_max);
-            let gpu_norm = engine::normalize_temp(gpu_work, settings.gpu_temp_min, settings.gpu_temp_max);
+            let sources = engine::SourceValues {
+                raw: work,
+                norm: [
+                    engine::normalize_temp(work[0], settings.cpu_temp_min, settings.cpu_temp_max),
+                    engine::normalize_temp(work[1], settings.gpu_temp_min, settings.gpu_temp_max),
+                    (work[2] / 100.0).clamp(0.0, 1.0),
+                    (work[3] / 100.0).clamp(0.0, 1.0),
+                    (work[4] / 100.0).clamp(0.0, 1.0),
+                    (work[5] / fps_scale).clamp(0.0, 1.0),
+                ],
+            };
             let time = animation_start.elapsed().as_secs_f64();
 
-            if send_frame(&mut client, &mut map, &settings, time, cpu_norm, gpu_norm, cpu_work, gpu_work).is_err() {
+            if send_frame(&mut client, &mut map, &settings, time, &sources).is_err() {
                 note("OpenRGB connection lost — reconnecting");
                 break 'frames;
             }
@@ -276,7 +287,7 @@ impl MahmSource {
         }
     }
 
-    fn read(&mut self) -> Option<afterburner::Temps> {
+    fn read(&mut self) -> Option<afterburner::Readings> {
         if self.reader.is_none() {
             let due = self
                 .last_attempt
@@ -288,7 +299,7 @@ impl MahmSource {
             }
         }
         let reader = self.reader.as_ref()?;
-        match reader.read_temps() {
+        match reader.read_all() {
             Some(t) => {
                 self.stale_reads = 0;
                 Some(t)
@@ -400,24 +411,19 @@ fn switch_to_direct(
 // Frame rendering
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn send_frame(
     client: &mut OpenRgbClient,
     map: &mut RenderMap,
     settings: &Settings,
     time: f64,
-    cpu_norm: f32,
-    gpu_norm: f32,
-    cpu_c: f32,
-    gpu_c: f32,
+    sources: &engine::SourceValues,
 ) -> std::io::Result<()> {
     for zone in map.zones.iter_mut() {
         let Some(cfg) = settings.zones.get(zone.cfg) else {
             continue; // settings shrank since resolve; remap follows shortly
         };
-        let frame = engine::render_zone_config(
-            settings, cfg, zone.leds as usize, time, cpu_norm, gpu_norm, cpu_c, gpu_c,
-        );
+        let frame =
+            engine::render_zone_config(settings, cfg, zone.leds as usize, time, sources);
         if frame == zone.last_frame {
             continue; // nothing changed — skip the write entirely
         }

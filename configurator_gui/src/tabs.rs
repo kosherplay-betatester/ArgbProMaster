@@ -352,11 +352,13 @@ fn zone_row(
             egui::ComboBox::from_id_salt(format!("target_{salt}"))
                 .selected_text(zone.target_source.label())
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut zone.target_source, TargetSource::Cpu, "CPU");
-                    ui.selectable_value(&mut zone.target_source, TargetSource::Gpu, "GPU");
+                    for source in TargetSource::ALL {
+                        ui.selectable_value(&mut zone.target_source, source, source.label())
+                            .on_hover_text(source.describe());
+                    }
                 })
                 .response
-                .on_hover_text("Which temperature drives this zone's animation.");
+                .on_hover_text("Which system component drives this zone — temperatures, loads, RAM use or framerate.");
             ui.end_row();
 
             ui.label("Effect");
@@ -558,8 +560,9 @@ fn idle_effect_card(app: &mut App, ui: &mut egui::Ui) {
         });
         ui.label(
             RichText::new(
-                "Once the CPU (or GPU) cools off into this range, the idle look kicks in; \
-                 the moment it heats past it, the normal effect returns.",
+                "Once a zone's source settles into this range, the idle look kicks in; the \
+                 moment it leaves, the normal effect returns. The range is in the source's own \
+                 units — °C for temperatures, % for loads.",
             )
             .small()
             .color(theme::TEXT_DIM),

@@ -3,7 +3,7 @@
 
 use crate::settings::{
     ColorConfig, CustomEffect, EffectTuning, EffectsMode, MotionKind, OverlayKind, Settings,
-    TargetSource, ThermalBind, ZoneConfig,
+    ThermalBind, ZoneConfig,
 };
 
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -474,40 +474,36 @@ pub fn render_custom(
     out
 }
 
+/// All source metrics in one bundle, indexed by `TargetSource::index()`:
+/// `norm` = 0..1 for coloring, `raw` = natural units (°C, %, frames/s) for
+/// the idle-range check.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceValues {
+    pub norm: [f32; 6],
+    pub raw: [f32; 6],
+}
+
 /// Render a configured zone: resolves idle mode, custom vs builtin effect,
-/// per-zone colors and thermal source. Disabled zones render black.
-/// This is THE render entry point shared by the daemon and the GUI preview.
-///
-/// `cpu_c` / `gpu_c` are the raw temperatures in °C (for the idle-range
-/// check); `cpu_norm` / `gpu_norm` are the same values normalized onto the
-/// response curves (for coloring).
-#[allow(clippy::too_many_arguments)]
+/// per-zone colors and its chosen component source. Disabled zones render
+/// black. This is THE render entry point shared by daemon and GUI preview.
 pub fn render_zone_config(
     settings: &Settings,
     zone: &ZoneConfig,
     led_count: usize,
     time: f64,
-    cpu_norm: f32,
-    gpu_norm: f32,
-    cpu_c: f32,
-    gpu_c: f32,
+    sources: &SourceValues,
 ) -> Vec<[u8; 3]> {
     if !zone.enabled {
         return vec![[0, 0, 0]; led_count];
     }
-    let temp = match zone.target_source {
-        TargetSource::Cpu => cpu_norm,
-        TargetSource::Gpu => gpu_norm,
-    };
+    let idx = zone.target_source.index();
+    let temp = sources.norm[idx];
 
-    // Idle mode: while this zone's sensor rests inside the chosen °C range,
-    // show the calmer idle effect instead of the normal one.
+    // Idle mode: while this zone's source rests inside the chosen range (in
+    // its natural units — °C or %), show the calmer idle effect instead.
     if settings.idle_enabled {
-        let temp_c = match zone.target_source {
-            TargetSource::Cpu => cpu_c,
-            TargetSource::Gpu => gpu_c,
-        };
-        if temp_c >= settings.idle_temp_min && temp_c <= settings.idle_temp_max {
+        let raw = sources.raw[idx];
+        if raw >= settings.idle_temp_min && raw <= settings.idle_temp_max {
             if let Some(fx) = settings
                 .idle_custom_effect
                 .as_deref()
@@ -677,12 +673,13 @@ mod tests {
             ..CustomEffect::default()
         });
         let mut zone = ZoneConfig { enabled: true, custom_effect: Some("Mine".into()), ..ZoneConfig::default() };
-        let frame = render_zone_config(&s, &zone, 4, 0.0, 0.2, 0.2, 45.0, 35.0);
+        let sv = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 20.0, 20.0, 20.0, 60.0] };
+        let frame = render_zone_config(&s, &zone, 4, 0.0, &sv);
         // Full-brightness custom palette color scaled by global brightness 0.70.
         assert_eq!(frame[0], [0, 1, 2]);
         // Unknown names fall back to the builtin path instead of crashing.
         zone.custom_effect = Some("Ghost".into());
-        let fallback = render_zone_config(&s, &zone, 4, 0.0, 0.2, 0.2, 45.0, 35.0);
+        let fallback = render_zone_config(&s, &zone, 4, 0.0, &sv);
         assert_eq!(fallback.len(), 4);
     }
 
@@ -698,15 +695,17 @@ mod tests {
         let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
         // CPU at 42°C (inside range) → idle Breathing, not Solid: pick a time
         // where the breath is clearly dimmer than solid.
-        let idle = render_zone_config(&s, &zone, 4, 4.9, 0.3, 0.3, 42.0, 60.0);
+        let inside = SourceValues { norm: [0.3; 6], raw: [42.0, 60.0, 0.0, 0.0, 0.0, 0.0] };
+        let outside = SourceValues { norm: [0.3; 6], raw: [70.0, 60.0, 0.0, 0.0, 0.0, 0.0] };
+        let idle = render_zone_config(&s, &zone, 4, 4.9, &inside);
         let solid = render_zone(EffectsMode::Solid, &s.colors, 4, 4.9, 0.3, s.global_brightness, EffectTuning::default());
         assert_ne!(idle, solid, "inside the idle range the idle effect must render");
         // CPU at 70°C (outside) → the normal effect again.
-        let normal = render_zone_config(&s, &zone, 4, 4.9, 0.3, 0.3, 70.0, 60.0);
+        let normal = render_zone_config(&s, &zone, 4, 4.9, &outside);
         assert_eq!(normal, solid, "outside the range the normal effect returns");
         // Disabled idle → normal even inside the range.
         s.idle_enabled = false;
-        let off = render_zone_config(&s, &zone, 4, 4.9, 0.3, 0.3, 42.0, 60.0);
+        let off = render_zone_config(&s, &zone, 4, 4.9, &inside);
         assert_eq!(off, solid);
     }
 

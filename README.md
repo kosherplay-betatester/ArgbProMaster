@@ -17,7 +17,9 @@ dark-themed GUI whose live preview is **pixel-identical** to what your LEDs do.
 
 - 🔌 **Auto-detects every zone** OpenRGB exposes — including *empty* ARGB
   headers, shown as "💤 set a LED count to bring it to life". Give each zone its
-  own thermal source (CPU or GPU), effect, colors and friendly name.
+  own effect, colors, friendly name — and its own **component source**:
+  **CPU °C, GPU °C, CPU load, GPU load, RAM use, or FPS**. Front fans on GPU
+  temp, underglow on CPU temp, a strip that pulses with framerate — mix freely.
 - 🎬 **14 built-in effects**, all temperature-aware:
   Thermal Wave (an organic lava-sea flow), **Thermal Fill** (the strip fills
   0–100% like a thermometer), Ember Flicker, Aurora Drift, Comet Chase, Meteor
@@ -143,7 +145,7 @@ within a second, live.
 | Tab | What it does |
 |---|---|
 | 🎨 **Presets & Themes** | One-click looks + save/load your own named presets. |
-| 🔌 **Zones & Ports** | Everything OpenRGB detected. Per zone: enable, LED count, CPU/GPU source, its own effect (builtin or ★ custom), its own colors. |
+| 🔌 **Zones & Ports** | Everything OpenRGB detected. Per zone: enable, LED count, component source (CPU/GPU temperature, CPU/GPU load, RAM use, FPS), its own effect (builtin or ★ custom), its own colors. |
 | 🌡 **Thermal Curves** | The temperature window per sensor (e.g. 40–85 °C), the global cold→warm→hot colors, the global effect, the 🎛 per-effect tuning card (Speed / Intensity / Style), and the 😴 Idle Effect (range + look shown while temps rest). |
 | 🧪 **Effect Lab** | Build, edit and manage your own ★ effects with a live preview. |
 | ⚙ **Advanced** | Animation FPS, easing, brightness with a 70% Safety Power Lock, daemon start/stop, and the safety net: **🔧 Fix My RGB** (one click back to a known-good working state), **♻ Reset All to Defaults** (settings only — zones and custom presets survive), **💡 Restore original lighting** (hand every device back to its built-in firmware effect). |

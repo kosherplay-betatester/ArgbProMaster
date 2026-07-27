@@ -20,6 +20,22 @@ pub struct Temps {
     pub gpu: Option<f32>,
 }
 
+/// Every system metric a zone can follow, when Afterburner publishes it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Readings {
+    pub cpu_temp: Option<f32>,
+    pub gpu_temp: Option<f32>,
+    /// Percent 0..100.
+    pub cpu_load: Option<f32>,
+    /// Percent 0..100.
+    pub gpu_load: Option<f32>,
+    /// Percent of installed memory 0..100.
+    pub ram_pct: Option<f32>,
+    pub fps: Option<f32>,
+    /// Afterburner's own scale hint for framerate (0 when unknown).
+    pub fps_max: f32,
+}
+
 #[cfg(windows)]
 mod imp {
     use super::Temps;
@@ -80,6 +96,11 @@ mod imp {
         /// Read the current CPU / GPU temperatures. Returns `None` when the
         /// shared memory is stale or malformed (e.g. Afterburner shutting down).
         pub fn read_temps(&self) -> Option<Temps> {
+            self.read_all().map(|r| Temps { cpu: r.cpu_temp, gpu: r.gpu_temp })
+        }
+
+        /// Read every supported metric in one pass over the shared memory.
+        pub fn read_all(&self) -> Option<super::Readings> {
             unsafe {
                 let base = self.view;
                 let signature = read_u32(base, 0);
@@ -96,40 +117,58 @@ mod imp {
                     return None;
                 }
 
-                let mut temps = Temps::default();
+                let mut r = super::Readings::default();
                 for i in 0..num_entries {
                     let entry = base.add(header_size + i * entry_size);
                     let name = read_cstr(entry, ENTRY_NAME_LEN);
-                    let is_cpu = name.eq_ignore_ascii_case("CPU temperature");
-                    let is_gpu = name.eq_ignore_ascii_case("GPU temperature");
-                    // Fall back to per-core / per-gpu entries ("CPU1 temperature",
-                    // "GPU1 temperature") if the aggregate sources are disabled.
-                    let is_cpu_like = !is_cpu
-                        && temps.cpu.is_none()
-                        && name.starts_with("CPU")
-                        && name.ends_with("temperature");
-                    let is_gpu_like = !is_gpu
-                        && temps.gpu.is_none()
-                        && name.starts_with("GPU")
-                        && name.ends_with("temperature");
-                    if is_cpu || is_gpu || is_cpu_like || is_gpu_like {
-                        let value = f32::from_le_bytes([
-                            *entry.add(ENTRY_DATA_OFFSET),
-                            *entry.add(ENTRY_DATA_OFFSET + 1),
-                            *entry.add(ENTRY_DATA_OFFSET + 2),
-                            *entry.add(ENTRY_DATA_OFFSET + 3),
-                        ]);
-                        if value.is_finite() && value > -100.0 && value < 200.0 {
-                            if is_cpu || (is_cpu_like && temps.cpu.is_none()) {
-                                temps.cpu = Some(value);
-                            }
-                            if is_gpu || (is_gpu_like && temps.gpu.is_none()) {
-                                temps.gpu = Some(value);
-                            }
+                    let value = f32::from_le_bytes([
+                        *entry.add(ENTRY_DATA_OFFSET),
+                        *entry.add(ENTRY_DATA_OFFSET + 1),
+                        *entry.add(ENTRY_DATA_OFFSET + 2),
+                        *entry.add(ENTRY_DATA_OFFSET + 3),
+                    ]);
+                    if !value.is_finite() || !(-1000.0..=1_000_000.0).contains(&value) {
+                        continue;
+                    }
+                    let max_limit = f32::from_le_bytes([
+                        *entry.add(ENTRY_DATA_OFFSET + 8),
+                        *entry.add(ENTRY_DATA_OFFSET + 9),
+                        *entry.add(ENTRY_DATA_OFFSET + 10),
+                        *entry.add(ENTRY_DATA_OFFSET + 11),
+                    ]);
+
+                    // Aggregate sources win; per-core/per-gpu entries
+                    // ("CPU1 temperature", "GPU1 usage") fill gaps.
+                    let temp_ok = (-100.0..200.0).contains(&value);
+                    if name.eq_ignore_ascii_case("CPU temperature") && temp_ok {
+                        r.cpu_temp = Some(value);
+                    } else if name.eq_ignore_ascii_case("GPU temperature") && temp_ok {
+                        r.gpu_temp = Some(value);
+                    } else if r.cpu_temp.is_none() && temp_ok && name.starts_with("CPU") && name.ends_with("temperature") {
+                        r.cpu_temp = Some(value);
+                    } else if r.gpu_temp.is_none() && temp_ok && name.starts_with("GPU") && name.ends_with("temperature") {
+                        r.gpu_temp = Some(value);
+                    } else if name.eq_ignore_ascii_case("CPU usage") {
+                        r.cpu_load = Some(value.clamp(0.0, 100.0));
+                    } else if name.eq_ignore_ascii_case("GPU usage") {
+                        r.gpu_load = Some(value.clamp(0.0, 100.0));
+                    } else if r.cpu_load.is_none() && name.starts_with("CPU") && name.ends_with("usage") {
+                        r.cpu_load = Some(value.clamp(0.0, 100.0));
+                    } else if r.gpu_load.is_none() && name.starts_with("GPU") && name.ends_with("usage") {
+                        r.gpu_load = Some(value.clamp(0.0, 100.0));
+                    } else if name.eq_ignore_ascii_case("RAM usage") {
+                        // Reported in MB; the entry's max limit is installed RAM.
+                        if max_limit > 0.0 {
+                            r.ram_pct = Some((value / max_limit * 100.0).clamp(0.0, 100.0));
+                        }
+                    } else if name.eq_ignore_ascii_case("Framerate") {
+                        r.fps = Some(value.max(0.0));
+                        if max_limit.is_finite() && max_limit > 0.0 {
+                            r.fps_max = max_limit;
                         }
                     }
                 }
-                Some(temps)
+                Some(r)
             }
         }
     }
@@ -161,7 +200,7 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
-    use super::Temps;
+    use super::{Readings, Temps};
 
     pub struct MahmReader;
 
@@ -170,6 +209,9 @@ mod imp {
             None
         }
         pub fn read_temps(&self) -> Option<Temps> {
+            None
+        }
+        pub fn read_all(&self) -> Option<Readings> {
             None
         }
     }

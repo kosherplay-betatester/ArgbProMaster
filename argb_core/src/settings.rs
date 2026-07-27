@@ -127,19 +127,64 @@ impl EffectTuning {
     }
 }
 
+/// Which system component / metric drives a zone's animation.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetSource {
     #[serde(rename = "CPU")]
     Cpu,
     #[serde(rename = "GPU")]
     Gpu,
+    #[serde(rename = "CPU Load")]
+    CpuLoad,
+    #[serde(rename = "GPU Load")]
+    GpuLoad,
+    #[serde(rename = "RAM")]
+    Ram,
+    #[serde(rename = "FPS")]
+    Fps,
 }
 
 impl TargetSource {
+    pub const ALL: [TargetSource; 6] = [
+        TargetSource::Cpu,
+        TargetSource::Gpu,
+        TargetSource::CpuLoad,
+        TargetSource::GpuLoad,
+        TargetSource::Ram,
+        TargetSource::Fps,
+    ];
+
+    /// Stable slot in the engine's source-value arrays.
+    pub fn index(self) -> usize {
+        match self {
+            TargetSource::Cpu => 0,
+            TargetSource::Gpu => 1,
+            TargetSource::CpuLoad => 2,
+            TargetSource::GpuLoad => 3,
+            TargetSource::Ram => 4,
+            TargetSource::Fps => 5,
+        }
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
-            TargetSource::Cpu => "CPU",
-            TargetSource::Gpu => "GPU",
+            TargetSource::Cpu => "CPU °C",
+            TargetSource::Gpu => "GPU °C",
+            TargetSource::CpuLoad => "CPU Load",
+            TargetSource::GpuLoad => "GPU Load",
+            TargetSource::Ram => "RAM Use",
+            TargetSource::Fps => "FPS",
+        }
+    }
+
+    pub fn describe(&self) -> &'static str {
+        match self {
+            TargetSource::Cpu => "CPU temperature — the classic thermal display.",
+            TargetSource::Gpu => "GPU temperature — great for game load.",
+            TargetSource::CpuLoad => "CPU usage in % — reacts instantly to work, not heat.",
+            TargetSource::GpuLoad => "GPU usage in % — lights up the moment a game starts rendering.",
+            TargetSource::Ram => "RAM usage in % of installed memory.",
+            TargetSource::Fps => "Framerate — cold when it stutters, hot when it flies.",
         }
     }
 }

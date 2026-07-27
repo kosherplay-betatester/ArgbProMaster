@@ -34,6 +34,32 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let cpu_n = engine::normalize_temp(app.sim_cpu_smooth, s.cpu_temp_min, s.cpu_temp_max);
             let gpu_n = engine::normalize_temp(app.sim_gpu_smooth, s.gpu_temp_min, s.gpu_temp_max);
 
+            // Non-temperature sources: real readings when following the
+            // sensors, the "other sensors" mock slider otherwise.
+            let (cl, gl, ram, fps, fps_max) = if let Some(r) = &app.live_readings {
+                (
+                    r.cpu_load.unwrap_or(0.0),
+                    r.gpu_load.unwrap_or(0.0),
+                    r.ram_pct.unwrap_or(0.0),
+                    r.fps.unwrap_or(0.0),
+                    if r.fps_max > 0.0 { r.fps_max } else { 240.0 },
+                )
+            } else {
+                let v = app.sim_other;
+                (v, v, v, v * 2.4, 240.0)
+            };
+            let sources = engine::SourceValues {
+                raw: [app.sim_cpu_smooth, app.sim_gpu_smooth, cl, gl, ram, fps],
+                norm: [
+                    cpu_n,
+                    gpu_n,
+                    (cl / 100.0).clamp(0.0, 1.0),
+                    (gl / 100.0).clamp(0.0, 1.0),
+                    (ram / 100.0).clamp(0.0, 1.0),
+                    (fps / fps_max).clamp(0.0, 1.0),
+                ],
+            };
+
             let enabled: Vec<&argb_core::settings::ZoneConfig> = s
                 .zones
                 .iter()
@@ -57,10 +83,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             const MAX_ROWS: usize = 8;
             for zone in enabled.iter().take(MAX_ROWS) {
                 let leds = zone.effective_leds();
-                let frame = engine::render_zone_config(
-                    s, zone, leds as usize, time, cpu_n, gpu_n,
-                    app.sim_cpu_smooth, app.sim_gpu_smooth,
-                );
+                let frame =
+                    engine::render_zone_config(s, zone, leds as usize, time, &sources);
                 let title = if zone.display_name.is_empty() {
                     zone.device_name.as_str()
                 } else {
@@ -133,6 +157,13 @@ fn simulator_card(app: &mut App, ui: &mut egui::Ui) {
                 .suffix(" °C"),
         )
         .on_hover_text("Mock GPU temperature. Only affects this preview — never the real daemon.");
+        ui.add_enabled(
+            !live,
+            egui::Slider::new(&mut app.sim_other, 0.0..=100.0)
+                .text("Loads")
+                .suffix(" %"),
+        )
+        .on_hover_text("Mock value for the non-temperature sources: CPU/GPU load, RAM use, and FPS (as % of max). Only affects this preview.");
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             temp_badge(ui, "CPU", app.sim_cpu_smooth,
@@ -167,7 +198,7 @@ fn zone_card(
                 if enabled {
                     let color = match target {
                         TargetSource::Cpu => theme::ACCENT,
-                        TargetSource::Gpu => theme::ACCENT_2,
+                        _ => theme::ACCENT_2,
                     };
                     theme::chip(ui, target.label(), color);
                 } else {

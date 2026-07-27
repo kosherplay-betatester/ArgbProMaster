@@ -92,6 +92,12 @@ pub fn apply_builtin(name: &str, s: &mut Settings) -> bool {
                 warm_color: [180, 0, 255],
                 hot_color: [255, 10, 10],
             };
+            // Classic Wave variant with a pronounced crest: one bright wave
+            // chasing along the gradient instead of the lava-sea shimmer.
+            s.effect_tuning.insert(
+                EffectsMode::ThermalWave,
+                EffectTuning { speed: 1.2, intensity: 0.7, variant: 1 },
+            );
         }
         "Cyberpunk 2077" => {
             reset_baseline(s);

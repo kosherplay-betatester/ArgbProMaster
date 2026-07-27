@@ -34,6 +34,10 @@ pub struct App {
     pub sim_gpu: f32,
     pub sim_cpu_smooth: f32,
     pub sim_gpu_smooth: f32,
+    /// Mock value (0..100 %) for the non-temperature sources (loads/RAM/FPS).
+    pub sim_other: f32,
+    /// Latest real sensor readings while "follow real temperatures" is on.
+    pub live_readings: Option<argb_core::afterburner::Readings>,
     // custom presets
     pub new_preset_name: String,
     // Effect Lab editor state
@@ -109,6 +113,8 @@ impl App {
             sim_gpu: 45.0,
             sim_cpu_smooth: 55.0,
             sim_gpu_smooth: 45.0,
+            sim_other: 40.0,
+            live_readings: None,
             new_preset_name: String::new(),
             effect_draft: CustomEffect::default(),
             detect_rx: None,
@@ -548,16 +554,18 @@ impl eframe::App for App {
             if self.mahm.is_none() {
                 self.mahm = argb_core::afterburner::MahmReader::open();
             }
-            if let Some(temps) = self.mahm.as_ref().and_then(|m| m.read_temps()) {
-                if let Some(c) = temps.cpu {
+            if let Some(readings) = self.mahm.as_ref().and_then(|m| m.read_all()) {
+                if let Some(c) = readings.cpu_temp {
                     self.sim_cpu = c;
                 }
-                if let Some(g) = temps.gpu {
+                if let Some(g) = readings.gpu_temp {
                     self.sim_gpu = g;
                 }
+                self.live_readings = Some(readings);
             }
         } else {
             self.mahm = None;
+            self.live_readings = None;
         }
 
         // Report a finished "restore original lighting" run.
