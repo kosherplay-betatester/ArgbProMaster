@@ -205,14 +205,14 @@ impl App {
             zone.effect_override = None;
             zone.custom_effect = None;
             zone.colors_override = None;
-            // RAM sticks talk over the slow SMBus bus; driving them per-frame
-            // chokes the pipeline and makes everything flicker erratically.
-            // Known-good means: everything EXCEPT RAM on, RAM opt-in.
+            // Known-good means: zones with REAL, currently-detected LEDs on.
+            // RAM stays opt-in (slow SMBus), and headers the hardware reports
+            // as empty stay off even if an old LED count lingers in the file.
             let is_smbus_ram = zone.device_type == 1;
-            if zone.effective_leds() > 0 && !is_smbus_ram {
+            if zone.last_seen_leds > 0 && !is_smbus_ram {
                 zone.enabled = true;
                 enabled += 1;
-            } else if is_smbus_ram {
+            } else {
                 zone.enabled = false;
             }
         }

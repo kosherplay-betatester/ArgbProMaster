@@ -65,6 +65,11 @@ struct ResolvedZone {
     /// range boundary must not flip the look every frame (= flicker).
     idle_state: bool,
     idle_changed: Option<Instant>,
+    /// GPU (I2C) and DRAM (SMBus) zones live on slow buses: pushing them at
+    /// full frame rate backs up OpenRGB's queue until the socket times out —
+    /// a 16-second reconnect loop that strobes everything. Rate-limit them.
+    slow_bus: bool,
+    last_sent: Option<Instant>,
 }
 
 /// Where the configured zones actually live on the OpenRGB server.
@@ -393,6 +398,8 @@ fn discover(client: &mut OpenRgbClient, settings: &Settings) -> std::io::Result<
                 fade_start: None,
                 idle_state: false,
                 idle_changed: None,
+                slow_bus: matches!(cfg.device_type, 1 | 2), // DRAM / GPU
+                last_sent: None,
             });
         }
     }
@@ -525,12 +532,24 @@ fn send_frame(
         if frame == zone.last_frame {
             continue; // nothing changed — skip the write entirely
         }
+        // Slow buses get at most 10 updates/sec; the animation math stays
+        // per-frame, so when their turn comes they show the freshest colors.
+        const SLOW_BUS_INTERVAL: Duration = Duration::from_millis(100);
+        if zone.slow_bus
+            && zone
+                .last_sent
+                .map(|t| t.elapsed() < SLOW_BUS_INTERVAL)
+                .unwrap_or(false)
+        {
+            continue;
+        }
         if zone.zone_idx >= 0 {
             client.update_zone(zone.device, zone.zone_idx as u32, &frame)?;
         } else {
             client.update_leds(zone.device, &frame)?;
         }
         zone.last_frame = frame;
+        zone.last_sent = Some(Instant::now());
     }
     Ok(())
 }
