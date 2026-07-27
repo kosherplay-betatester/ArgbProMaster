@@ -50,6 +50,9 @@ pub struct App {
     pub live_readings: Option<argb_core::afterburner::Readings>,
     // custom presets
     pub new_preset_name: String,
+    // Apply & Save confirmation dialog
+    save_prompt_open: bool,
+    save_prompt_name: String,
     // Effect Lab editor state
     pub effect_draft: CustomEffect,
     // zone detection (background scan of the OpenRGB server)
@@ -126,6 +129,8 @@ impl App {
             sim_other: 40.0,
             live_readings: None,
             new_preset_name: String::new(),
+            save_prompt_open: false,
+            save_prompt_name: String::new(),
             effect_draft: CustomEffect::default(),
             detect_rx: None,
             detected_devices: HashSet::new(),
@@ -189,6 +194,84 @@ impl App {
 
     pub fn restore_running(&self) -> bool {
         self.restore_rx.is_some()
+    }
+
+    /// Apply everything, ensure the daemon runs, slip into the tray.
+    fn apply_and_hide(&mut self, ctx: &egui::Context) {
+        if self.save_settings() {
+            let _ = util::spawn_daemon();
+            if self._tray.is_some() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+        }
+    }
+
+    /// The Apply & Save confirmation: applies ALL changed settings, and first
+    /// offers to keep the whole setup as a named preset for later loading.
+    fn save_prompt(&mut self, ctx: &egui::Context) {
+        if !self.save_prompt_open {
+            return;
+        }
+        egui::Window::new("💾 Apply & Save")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("Every changed setting from all tabs will be applied and saved.");
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Would you also like to keep this whole setup as a preset you can load any time?")
+                        .strong(),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Preset name");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.save_prompt_name)
+                            .hint_text("e.g. My Gaming Look…")
+                            .desired_width(200.0),
+                    );
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let has_name = !self.save_prompt_name.trim().is_empty();
+                    if ui
+                        .add_enabled(has_name, egui::Button::new(RichText::new("💾 Save as preset & apply").strong()))
+                        .on_hover_text(if has_name {
+                            "Snapshots everything under this name (find it in Presets & Themes), then applies."
+                        } else {
+                            "Type a name first — or use “Just apply” below."
+                        })
+                        .clicked()
+                    {
+                        let name = self.save_prompt_name.trim().to_string();
+                        let data = argb_core::settings::PresetData::capture(&self.settings);
+                        self.settings.custom_presets.retain(|p| p.name != name);
+                        self.settings
+                            .custom_presets
+                            .push(argb_core::settings::CustomPreset { name: name.clone(), data });
+                        self.settings.active_preset = name.clone();
+                        self.save_prompt_open = false;
+                        self.toast(
+                            format!("“{name}” saved to your presets — settings applied, running in the tray."),
+                            theme::OK,
+                        );
+                        self.apply_and_hide(ctx);
+                    }
+                    if ui
+                        .button("✔ Just apply & save")
+                        .on_hover_text("Applies and saves everything without creating a preset.")
+                        .clicked()
+                    {
+                        self.save_prompt_open = false;
+                        self.apply_and_hide(ctx);
+                    }
+                    if ui.button("Cancel").on_hover_text("Back to editing — nothing is saved yet.").clicked() {
+                        self.save_prompt_open = false;
+                    }
+                });
+            });
     }
 
     /// 🔧 The panic button: put EVERYTHING back into a known-good, working
@@ -510,16 +593,11 @@ impl App {
                         .min_size(egui::vec2(140.0, 34.0));
                         if ui
                             .add(apply)
-                            .on_hover_text("Saves, makes sure the daemon is running, and slips into the tray — your lights keep going. Quit fully from the tray menu.")
+                            .on_hover_text("Applies every changed setting from all tabs, offers to keep them as a named preset, then slips into the tray with the daemon running.")
                             .clicked()
-                            && self.save_settings()
                         {
-                            let _ = util::spawn_daemon();
-                            if self._tray.is_some() {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                            } else {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                            }
+                            self.save_prompt_open = true;
+                            self.save_prompt_name.clear();
                         }
 
                         let run_bg = egui::Button::new(RichText::new("🚀 Run in Background"))
@@ -631,6 +709,7 @@ impl eframe::App for App {
         self.top_bar(ctx);
         self.setup_banner(ctx);
         self.bottom_bar(ctx);
+        self.save_prompt(ctx);
         preview::show(self, ctx);
 
         egui::CentralPanel::default()
