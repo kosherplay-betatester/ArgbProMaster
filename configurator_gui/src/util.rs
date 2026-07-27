@@ -198,6 +198,15 @@ pub fn winget_install(
     });
 }
 
+/// Open the project's GitHub page (guide, troubleshooting, releases).
+pub fn open_project_page() {
+    const URL: &str = "https://github.com/kosherplay-betatester/ArgbProMaster";
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(URL).spawn();
+    #[cfg(not(windows))]
+    let _ = std::process::Command::new("xdg-open").arg(URL).spawn();
+}
+
 pub fn open_settings_folder() {
     let dir = argb_core::settings::settings_dir();
     let _ = std::fs::create_dir_all(&dir);

@@ -939,6 +939,13 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
             {
                 util::open_settings_folder();
             }
+            if ui
+                .button("🌐 Help & Project Page")
+                .on_hover_text("Opens the ArgbProMaster page on GitHub — full guide, troubleshooting and updates.")
+                .clicked()
+            {
+                util::open_project_page();
+            }
         });
         ui.separator();
         ui.horizontal(|ui| {

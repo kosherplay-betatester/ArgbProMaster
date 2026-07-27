@@ -18,6 +18,53 @@ fn to_f(c: [u8; 3]) -> [f32; 3] {
     [c[0] as f32, c[1] as f32, c[2] as f32]
 }
 
+// ---------------------------------------------------------------------------
+// Gamma-correct blending: LEDs (like monitors) receive sRGB-encoded values,
+// but light adds linearly. Blending raw sRGB makes gradient midpoints muddy
+// and dark; converting to linear light, blending there, and encoding back
+// gives the luminous, even gradients a color transition deserves.
+// ---------------------------------------------------------------------------
+
+fn srgb_to_linear(c: f32) -> f32 {
+    let c = (c / 255.0).clamp(0.0, 1.0);
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(l: f32) -> f32 {
+    let l = l.clamp(0.0, 1.0);
+    let c = if l <= 0.003_130_8 {
+        l * 12.92
+    } else {
+        1.055 * l.powf(1.0 / 2.4) - 0.055
+    };
+    c * 255.0
+}
+
+/// Blend two sRGB colors in linear-light space (perceptually even).
+fn lerp3_gamma(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    let t = t.clamp(0.0, 1.0);
+    [
+        linear_to_srgb(lerp(srgb_to_linear(a[0]), srgb_to_linear(b[0]), t)),
+        linear_to_srgb(lerp(srgb_to_linear(a[1]), srgb_to_linear(b[1]), t)),
+        linear_to_srgb(lerp(srgb_to_linear(a[2]), srgb_to_linear(b[2]), t)),
+    ]
+}
+
+/// Gamma-correct crossfade between two already-rendered sRGB frames' pixels.
+/// Used by the daemon's look-change transitions.
+pub fn blend_srgb(from: [u8; 3], to: [u8; 3], t: f32) -> [u8; 3] {
+    let mixed = lerp3_gamma(to_f(from), to_f(to), t);
+    [
+        mixed[0].round().clamp(0.0, 255.0) as u8,
+        mixed[1].round().clamp(0.0, 255.0) as u8,
+        mixed[2].round().clamp(0.0, 255.0) as u8,
+    ]
+}
+
 /// Map a normalized temperature (0 = cold, 1 = hot) onto the three-stop
 /// cold -> warm -> hot gradient.
 pub fn thermal_color(colors: &ColorConfig, t: f32) -> [f32; 3] {
@@ -478,7 +525,7 @@ pub fn palette_color(palette: &[(f32, [u8; 3])], t: f32) -> [f32; 3] {
                 let (p1, c1) = pair[1];
                 if t <= p1 {
                     let span = (p1 - p0).max(1e-6);
-                    return lerp3(to_f(c0), to_f(c1), (t - p0) / span);
+                    return lerp3_gamma(to_f(c0), to_f(c1), (t - p0) / span);
                 }
             }
             to_f(palette[palette.len() - 1].1)
@@ -822,15 +869,35 @@ mod tests {
     }
 
     #[test]
-    fn palette_color_interpolates_stops() {
+    fn palette_color_interpolates_stops_gamma_correct() {
         let p = vec![(0.0, [0u8, 0, 0]), (0.5, [100, 100, 100]), (1.0, [200, 200, 200])];
+        // Exact at the stops.
         assert_eq!(palette_color(&p, 0.0), [0.0, 0.0, 0.0]);
         assert_eq!(palette_color(&p, 1.0), [200.0, 200.0, 200.0]);
+        // Midpoints blend in linear light: brighter than the naive sRGB
+        // average (50), because light adds linearly — the anti-mud property.
         let mid = palette_color(&p, 0.25);
-        assert!((mid[0] - 50.0).abs() < 1.0);
+        assert!(mid[0] > 60.0 && mid[0] < 85.0, "gamma-correct mid, got {}", mid[0]);
         // Degenerate palettes never panic.
         assert_eq!(palette_color(&[], 0.5), [255.0, 255.0, 255.0]);
         assert_eq!(palette_color(&[(0.3, [9, 9, 9])], 0.9), [9.0, 9.0, 9.0]);
+    }
+
+    #[test]
+    fn blend_srgb_endpoints_and_monotonic() {
+        assert_eq!(blend_srgb([10, 20, 30], [200, 100, 50], 0.0), [10, 20, 30]);
+        assert_eq!(blend_srgb([10, 20, 30], [200, 100, 50], 1.0), [200, 100, 50]);
+        // A fade from black to white passes through a perceptual (not naive)
+        // midpoint and always moves forward, never backwards.
+        let mut prev = 0u8;
+        for step in 0..=10 {
+            let t = step as f32 / 10.0;
+            let v = blend_srgb([0, 0, 0], [255, 255, 255], t)[0];
+            assert!(v >= prev, "monotonic fade");
+            prev = v;
+        }
+        let mid = blend_srgb([0, 0, 0], [255, 255, 255], 0.5)[0];
+        assert!(mid > 150, "linear-light midpoint is perceptually mid, got {mid}");
     }
 
     #[test]

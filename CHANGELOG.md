@@ -1,0 +1,35 @@
+# Changelog
+
+## 1.2.1 (unreleased polish)
+- **Gamma-correct color pipeline**: all gradient lookups and look-change
+  crossfades now blend in linear light instead of raw sRGB — gradient
+  midpoints are luminous instead of muddy, and slow transitions read
+  perceptually even from end to end.
+- "Transition time" slider (0.2–5 s, default 1.5 s) for look-change
+  crossfades.
+- Stability hardening: Fix My RGB only auto-enables motherboard ARGB (HID)
+  zones; GPU (I2C) and RAM (SMBus) zones are strictly opt-in and capped at
+  2 updates/sec — slow buses can no longer flood OpenRGB into reconnect
+  loops. The daemon self-reports unsustainable frame rates in daemon.log.
+- In-app link to the project page and help.
+
+## 1.2 — Deep Customization (2026-07-27)
+- Multi-stop Color Journey: up to 8 gradient stops with live preview.
+- Idle Effect: own effect, own colors, own speed/intensity, with boundary
+  hysteresis (2-unit exit margin, 3 s dwell) — no strobing at range edges.
+- New effects: Light Trail (orbiting pulse with Trail length & Resolution),
+  Fireworks, Wave Collide — 17 effects total.
+- Seamless crossfades on every look change; six component sources per zone
+  (CPU/GPU °C, CPU/GPU load, RAM, FPS); tooltips everywhere.
+
+## 1.1 — Component Selector (2026-07-27)
+- Zones can follow CPU °C, GPU °C, CPU load, GPU load, RAM use, or FPS.
+- Live preview follows real sensors; Thermal Alert became a chase-style wave.
+
+## 1.0 (2026-07-26)
+- First release: auto-detected zones for any OpenRGB hardware, 14 effects,
+  per-effect tuning, Effect Lab custom-effect builder, presets, live
+  pixel-identical preview, tray quick menu, setup assistant (winget
+  auto-install of OpenRGB / MSI Afterburner), Fix My RGB, restore original
+  lighting, atomic hot-reloaded settings, panic-logging daemon measured at
+  0.024% CPU / 4.7 MB RAM.

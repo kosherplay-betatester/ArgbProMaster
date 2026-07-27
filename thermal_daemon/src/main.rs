@@ -517,14 +517,11 @@ fn send_frame(
                 zone.fade_start = None;
                 zone.fade_from = Vec::new();
             } else {
-                // Smoothstep blend: old look melts into the new one.
+                // Smoothstep, gamma-correct blend: old look melts into the
+                // new one through linear light — no muddy in-between colors.
                 let e = progress * progress * (3.0 - 2.0 * progress);
                 for (dst, src) in frame.iter_mut().zip(&zone.fade_from) {
-                    for ch in 0..3 {
-                        let a = src[ch] as f32;
-                        let b = dst[ch] as f32;
-                        dst[ch] = (a + (b - a) * e).round().clamp(0.0, 255.0) as u8;
-                    }
+                    *dst = engine::blend_srgb(*src, *dst, e);
                 }
             }
         }
