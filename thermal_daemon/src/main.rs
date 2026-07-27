@@ -458,9 +458,9 @@ fn send_frame(
     time: f64,
     sources: &engine::SourceValues,
 ) -> std::io::Result<()> {
-    /// How long a look-change (idle kicking in, preset/effect/color switch)
-    /// melts into the new effect instead of hard-cutting.
-    const STYLE_FADE_SECS: f32 = 0.7;
+    // How long a look-change (idle kicking in, preset/effect/color switch)
+    // melts into the new effect instead of hard-cutting — user-tunable.
+    let style_fade_secs = settings.transition_secs.clamp(0.2, 5.0);
     /// A zone leaves the idle look only when its source moves this far past
     /// the boundary, and never flips again within the dwell window — a value
     /// hovering exactly on the edge otherwise strobes between two looks.
@@ -512,7 +512,7 @@ fn send_frame(
         );
 
         if let Some(started) = zone.fade_start {
-            let progress = started.elapsed().as_secs_f32() / STYLE_FADE_SECS;
+            let progress = started.elapsed().as_secs_f32() / style_fade_secs;
             if progress >= 1.0 || zone.fade_from.len() != frame.len() {
                 zone.fade_start = None;
                 zone.fade_from = Vec::new();
@@ -532,9 +532,11 @@ fn send_frame(
         if frame == zone.last_frame {
             continue; // nothing changed — skip the write entirely
         }
-        // Slow buses get at most 10 updates/sec; the animation math stays
-        // per-frame, so when their turn comes they show the freshest colors.
-        const SLOW_BUS_INTERVAL: Duration = Duration::from_millis(100);
+        // Slow buses get at most 2 updates/sec — NvAPI I2C writes can take
+        // 100ms+ each, so anything faster still floods OpenRGB's queue into
+        // a reconnect loop. The animation math stays per-frame, so when
+        // their turn comes they show the freshest colors.
+        const SLOW_BUS_INTERVAL: Duration = Duration::from_millis(500);
         if zone.slow_bus
             && zone
                 .last_sent

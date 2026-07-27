@@ -877,6 +877,12 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
                 .text("Easing Speed"),
         )
         .on_hover_text("Easing Speed: Controls how slowly colors bleed when temperatures spike. Lower = dreamier, slower transitions; higher = snappy response.");
+        ui.add(
+            egui::Slider::new(&mut app.settings.transition_secs, 0.2..=5.0)
+                .custom_formatter(|v, _| format!("{v:.1} s"))
+                .text("Transition time"),
+        )
+        .on_hover_text("How long a look-change (idle kicking in, switching presets or effects) melts into the new one. Longer = slower, more cinematic crossfades.");
     });
     ui.add_space(8.0);
 

@@ -205,11 +205,12 @@ impl App {
             zone.effect_override = None;
             zone.custom_effect = None;
             zone.colors_override = None;
-            // Known-good means: zones with REAL, currently-detected LEDs on.
-            // RAM stays opt-in (slow SMBus), and headers the hardware reports
-            // as empty stay off even if an old LED count lingers in the file.
-            let is_smbus_ram = zone.device_type == 1;
-            if zone.last_seen_leds > 0 && !is_smbus_ram {
+            // Known-good means: motherboard ARGB zones (fast HID bus) with
+            // real detected LEDs. GPU (I2C) and RAM (SMBus) zones live on
+            // slow buses that can choke the whole pipeline into reconnect
+            // loops — they stay strictly opt-in via Zones & Ports.
+            let fast_bus_argb = zone.device_type == 0;
+            if fast_bus_argb && zone.last_seen_leds > 0 {
                 zone.enabled = true;
                 enabled += 1;
             } else {

@@ -604,6 +604,8 @@ pub struct Settings {
     /// Multi-stop Color Journey (2..=8 stops). Empty = use the classic
     /// 3-color `colors` above. Zones with color overrides keep their own.
     pub global_stops: Vec<(f32, [u8; 3])>,
+    /// How long look-changes crossfade (seconds). Slow and dreamy by default.
+    pub transition_secs: f32,
 }
 
 /// Stock brightness, shared by `Settings::default` and the preset baseline
@@ -641,6 +643,7 @@ impl Default for Settings {
             idle_colors: None,
             idle_tuning: None,
             global_stops: Vec::new(),
+            transition_secs: 1.5,
         }
     }
 }
@@ -682,6 +685,11 @@ impl Settings {
         if self.global_stops.len() == 1 {
             self.global_stops.clear();
         }
+        // Serde default fills a missing field with 0.0; treat that as "unset".
+        if self.transition_secs <= 0.0 {
+            self.transition_secs = 1.5;
+        }
+        self.transition_secs = self.transition_secs.clamp(0.2, 5.0);
     }
 
     /// The gradient every zone WITHOUT a color override travels: the custom
