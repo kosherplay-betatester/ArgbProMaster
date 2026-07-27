@@ -83,8 +83,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             const MAX_ROWS: usize = 8;
             for zone in enabled.iter().take(MAX_ROWS) {
                 let leds = zone.effective_leds();
+                let idle = engine::idle_wants(s, zone, &sources);
                 let frame =
-                    engine::render_zone_config(s, zone, leds as usize, time, &sources);
+                    engine::render_zone_config(s, zone, leds as usize, time, &sources, idle);
                 let title = if zone.display_name.is_empty() {
                     zone.device_name.as_str()
                 } else {

@@ -530,15 +530,11 @@ pub struct SourceValues {
 /// animation phase): resolved effect, idle state, colors, tuning, brightness.
 /// When this changes between frames, the renderer should crossfade instead of
 /// hard-cutting. Kept in sync with `render_zone_config`'s resolution logic.
-pub fn style_key(settings: &Settings, zone: &ZoneConfig, sources: &SourceValues) -> u64 {
+pub fn style_key(settings: &Settings, zone: &ZoneConfig, idle_active: bool) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
 
-    let idx = zone.target_source.index();
-    let raw = sources.raw[idx];
-    let idle_active =
-        settings.idle_enabled && raw >= settings.idle_temp_min && raw <= settings.idle_temp_max;
     idle_active.hash(&mut h);
     settings.global_brightness.to_bits().hash(&mut h);
     zone.enabled.hash(&mut h);
@@ -585,15 +581,29 @@ pub fn style_key(settings: &Settings, zone: &ZoneConfig, sources: &SourceValues)
     h.finish()
 }
 
+/// Does this zone's source currently sit inside the idle range? The raw
+/// boundary check — callers that render continuously (the daemon) should wrap
+/// it in hysteresis so a value hovering exactly on the edge doesn't make the
+/// look flip back and forth every frame.
+pub fn idle_wants(settings: &Settings, zone: &ZoneConfig, sources: &SourceValues) -> bool {
+    if !settings.idle_enabled {
+        return false;
+    }
+    let raw = sources.raw[zone.target_source.index()];
+    raw >= settings.idle_temp_min && raw <= settings.idle_temp_max
+}
+
 /// Render a configured zone: resolves idle mode, custom vs builtin effect,
 /// per-zone colors and its chosen component source. Disabled zones render
 /// black. This is THE render entry point shared by daemon and GUI preview.
+/// `idle_active` is decided by the caller (see [`idle_wants`]).
 pub fn render_zone_config(
     settings: &Settings,
     zone: &ZoneConfig,
     led_count: usize,
     time: f64,
     sources: &SourceValues,
+    idle_active: bool,
 ) -> Vec<[u8; 3]> {
     if !zone.enabled {
         return vec![[0, 0, 0]; led_count];
@@ -601,11 +611,9 @@ pub fn render_zone_config(
     let idx = zone.target_source.index();
     let temp = sources.norm[idx];
 
-    // Idle mode: while this zone's source rests inside the chosen range (in
-    // its natural units — °C or %), show the calmer idle effect instead.
-    if settings.idle_enabled {
-        let raw = sources.raw[idx];
-        if raw >= settings.idle_temp_min && raw <= settings.idle_temp_max {
+    // Idle mode: the calmer idle look, chosen with hysteresis by the caller.
+    if idle_active {
+        {
             if let Some(fx) = settings
                 .idle_custom_effect
                 .as_deref()
@@ -777,12 +785,12 @@ mod tests {
         });
         let mut zone = ZoneConfig { enabled: true, custom_effect: Some("Mine".into()), ..ZoneConfig::default() };
         let sv = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 20.0, 20.0, 20.0, 60.0] };
-        let frame = render_zone_config(&s, &zone, 4, 0.0, &sv);
+        let frame = render_zone_config(&s, &zone, 4, 0.0, &sv, false);
         // Full-brightness custom palette color scaled by global brightness 0.70.
         assert_eq!(frame[0], [0, 1, 2]);
         // Unknown names fall back to the builtin path instead of crashing.
         zone.custom_effect = Some("Ghost".into());
-        let fallback = render_zone_config(&s, &zone, 4, 0.0, &sv);
+        let fallback = render_zone_config(&s, &zone, 4, 0.0, &sv, false);
         assert_eq!(fallback.len(), 4);
     }
 
@@ -794,26 +802,26 @@ mod tests {
         let cool = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 10.0, 10.0, 30.0, 60.0] };
         let hot = SourceValues { norm: [0.9; 6], raw: [88.0, 80.0, 95.0, 95.0, 60.0, 30.0] };
 
-        // Temperature alone (same effect) must NOT retrigger a fade.
-        assert_eq!(style_key(&s, &zone, &cool), style_key(&s, &zone, &hot));
-
-        // Changing the effect, colors or tuning must.
-        let base = style_key(&s, &zone, &cool);
-        s.effects_mode = EffectsMode::CometChase;
-        assert_ne!(base, style_key(&s, &zone, &cool));
-        s.effects_mode = EffectsMode::ThermalWave;
-        s.colors.hot_color = [1, 2, 3];
-        assert_ne!(base, style_key(&s, &zone, &cool));
-
-        // Idle kicking in flips the key too.
+        // Temperature alone (same effect) must NOT retrigger a fade —
+        // idle_wants decides idle, and outside idle the key is source-free.
         let mut s2 = Settings::default();
         s2.idle_enabled = true;
         s2.idle_temp_min = 35.0;
         s2.idle_temp_max = 50.0;
-        assert_ne!(
-            style_key(&s2, &zone, &cool), // 45°C → idle active
-            style_key(&s2, &zone, &hot)   // 88°C → normal effect
-        );
+        assert!(idle_wants(&s2, &zone, &cool)); // 45°C → inside
+        assert!(!idle_wants(&s2, &zone, &hot)); // 88°C → outside
+        assert!(!idle_wants(&s, &zone, &cool)); // disabled → never
+
+        // Changing the effect, colors or tuning must change the key.
+        let base = style_key(&s, &zone, false);
+        s.effects_mode = EffectsMode::CometChase;
+        assert_ne!(base, style_key(&s, &zone, false));
+        s.effects_mode = EffectsMode::ThermalWave;
+        s.colors.hot_color = [1, 2, 3];
+        assert_ne!(base, style_key(&s, &zone, false));
+
+        // Idle kicking in flips the key too.
+        assert_ne!(style_key(&s2, &zone, true), style_key(&s2, &zone, false));
     }
 
     #[test]
@@ -830,16 +838,17 @@ mod tests {
         // where the breath is clearly dimmer than solid.
         let inside = SourceValues { norm: [0.3; 6], raw: [42.0, 60.0, 0.0, 0.0, 0.0, 0.0] };
         let outside = SourceValues { norm: [0.3; 6], raw: [70.0, 60.0, 0.0, 0.0, 0.0, 0.0] };
-        let idle = render_zone_config(&s, &zone, 4, 4.9, &inside);
+        assert!(idle_wants(&s, &zone, &inside));
+        assert!(!idle_wants(&s, &zone, &outside));
+        let idle = render_zone_config(&s, &zone, 4, 4.9, &inside, true);
         let solid = render_zone(EffectsMode::Solid, &s.colors, 4, 4.9, 0.3, s.global_brightness, EffectTuning::default());
-        assert_ne!(idle, solid, "inside the idle range the idle effect must render");
-        // CPU at 70°C (outside) → the normal effect again.
-        let normal = render_zone_config(&s, &zone, 4, 4.9, &outside);
-        assert_eq!(normal, solid, "outside the range the normal effect returns");
-        // Disabled idle → normal even inside the range.
+        assert_ne!(idle, solid, "with idle active the idle effect must render");
+        // Idle inactive → the normal effect, regardless of the raw value.
+        let normal = render_zone_config(&s, &zone, 4, 4.9, &outside, false);
+        assert_eq!(normal, solid);
+        // Disabled idle → idle_wants is always false.
         s.idle_enabled = false;
-        let off = render_zone_config(&s, &zone, 4, 4.9, &inside);
-        assert_eq!(off, solid);
+        assert!(!idle_wants(&s, &zone, &inside));
     }
 
     #[test]

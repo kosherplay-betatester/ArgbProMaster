@@ -61,6 +61,10 @@ struct ResolvedZone {
     style_key: u64,
     fade_from: Vec<[u8; 3]>,
     fade_start: Option<Instant>,
+    /// Idle-mode state with hysteresis: a source hovering exactly on the
+    /// range boundary must not flip the look every frame (= flicker).
+    idle_state: bool,
+    idle_changed: Option<Instant>,
 }
 
 /// Where the configured zones actually live on the OpenRGB server.
@@ -387,6 +391,8 @@ fn discover(client: &mut OpenRgbClient, settings: &Settings) -> std::io::Result<
                 style_key: 0,
                 fade_from: Vec::new(),
                 fade_start: None,
+                idle_state: false,
+                idle_changed: None,
             });
         }
     }
@@ -448,14 +454,39 @@ fn send_frame(
     /// How long a look-change (idle kicking in, preset/effect/color switch)
     /// melts into the new effect instead of hard-cutting.
     const STYLE_FADE_SECS: f32 = 0.7;
+    /// A zone leaves the idle look only when its source moves this far past
+    /// the boundary, and never flips again within the dwell window — a value
+    /// hovering exactly on the edge otherwise strobes between two looks.
+    const IDLE_EXIT_MARGIN: f32 = 2.0;
+    const IDLE_DWELL: Duration = Duration::from_secs(3);
 
     for zone in map.zones.iter_mut() {
         let Some(cfg) = settings.zones.get(zone.cfg) else {
             continue; // settings shrank since resolve; remap follows shortly
         };
 
+        // Idle decision with hysteresis + dwell.
+        let raw = sources.raw[cfg.target_source.index()];
+        let wants = engine::idle_wants(settings, cfg, sources);
+        let beyond_margin = !settings.idle_enabled
+            || raw < settings.idle_temp_min - IDLE_EXIT_MARGIN
+            || raw > settings.idle_temp_max + IDLE_EXIT_MARGIN;
+        let dwell_over = zone
+            .idle_changed
+            .map(|t| t.elapsed() >= IDLE_DWELL)
+            .unwrap_or(true);
+        if !settings.idle_enabled {
+            zone.idle_state = false;
+        } else if !zone.idle_state && wants && dwell_over {
+            zone.idle_state = true;
+            zone.idle_changed = Some(Instant::now());
+        } else if zone.idle_state && beyond_margin && dwell_over {
+            zone.idle_state = false;
+            zone.idle_changed = Some(Instant::now());
+        }
+
         // Detect look changes and arm a crossfade from the last shown frame.
-        let key = engine::style_key(settings, cfg, sources);
+        let key = engine::style_key(settings, cfg, zone.idle_state);
         if key != zone.style_key {
             if !zone.last_frame.is_empty() {
                 zone.fade_from = zone.last_frame.clone();
@@ -464,8 +495,14 @@ fn send_frame(
             zone.style_key = key;
         }
 
-        let mut frame =
-            engine::render_zone_config(settings, cfg, zone.leds as usize, time, sources);
+        let mut frame = engine::render_zone_config(
+            settings,
+            cfg,
+            zone.leds as usize,
+            time,
+            sources,
+            zone.idle_state,
+        );
 
         if let Some(started) = zone.fade_start {
             let progress = started.elapsed().as_secs_f32() / STYLE_FADE_SECS;
