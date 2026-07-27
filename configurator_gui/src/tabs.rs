@@ -754,7 +754,7 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("Animation Engine").strong());
         ui.add(egui::Slider::new(&mut app.settings.animation_fps, 5..=60).text("FPS"))
-            .on_hover_text("How many frames per second the daemon renders. 60 FPS feels monitor-smooth (the default); lower it if an older LED controller can't keep up.");
+            .on_hover_text("How many frames per second the daemon renders. 30 (the default) is silky and safe for USB LED controllers; if you raise it and the LEDs start to flicker erratically, the controller can't keep up — come back down.");
         ui.add(
             egui::Slider::new(&mut app.settings.smoothing_speed, 0.01..=0.5)
                 .logarithmic(true)

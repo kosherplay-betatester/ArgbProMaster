@@ -205,9 +205,15 @@ impl App {
             zone.effect_override = None;
             zone.custom_effect = None;
             zone.colors_override = None;
-            if zone.effective_leds() > 0 {
+            // RAM sticks talk over the slow SMBus bus; driving them per-frame
+            // chokes the pipeline and makes everything flicker erratically.
+            // Known-good means: everything EXCEPT RAM on, RAM opt-in.
+            let is_smbus_ram = zone.device_type == 1;
+            if zone.effective_leds() > 0 && !is_smbus_ram {
                 zone.enabled = true;
                 enabled += 1;
+            } else if is_smbus_ram {
+                zone.enabled = false;
             }
         }
         argb_core::presets::apply_builtin("Thermal Alert", &mut self.settings);

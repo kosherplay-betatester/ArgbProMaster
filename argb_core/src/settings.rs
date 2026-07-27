@@ -578,8 +578,10 @@ impl Default for Settings {
         Settings {
             active_preset: "Thermal Alert".to_string(),
             global_brightness: DEFAULT_BRIGHTNESS,
-            // Monitor-smooth by default; frame dedup keeps idle cost near zero.
-            animation_fps: 60,
+            // 30 FPS is the sweet spot for USB LED controllers: silky to the
+            // eye, comfortably within what their links sustain. Higher rates
+            // can overwhelm slower controllers into erratic flicker.
+            animation_fps: 30,
             smoothing_speed: 0.02,
             effects_mode: EffectsMode::ThermalWave,
             cpu_temp_min: 40.0,

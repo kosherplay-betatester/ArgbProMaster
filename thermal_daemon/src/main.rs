@@ -132,6 +132,8 @@ fn main() {
         // ---- frame loop ---------------------------------------------------
         let mut last_discover = Instant::now();
         let mut last_mode_guard = Instant::now();
+        let mut overruns = 0u32;
+        let mut overrun_noted = false;
         'frames: loop {
             let frame_start = Instant::now();
 
@@ -264,8 +266,25 @@ fn main() {
             }
 
             let frame_time = Duration::from_secs_f32(1.0 / settings.animation_fps.max(1) as f32);
-            if let Some(rest) = frame_time.checked_sub(frame_start.elapsed()) {
-                std::thread::sleep(rest);
+            match frame_time.checked_sub(frame_start.elapsed()) {
+                Some(rest) => {
+                    overruns = 0;
+                    std::thread::sleep(rest);
+                }
+                None => {
+                    // Writes took longer than the frame budget. A sustained
+                    // streak means the LED hardware can't keep this rate —
+                    // exactly what erratic flicker looks like. Say so once.
+                    overruns += 1;
+                    if overruns >= 90 && !overrun_noted {
+                        overrun_noted = true;
+                        note(&format!(
+                            "WARN: LED updates can't sustain {} FPS (a frame takes {:?}) — lower Animation FPS in Advanced, or disable slow zones (RAM/SMBus), to stop flicker",
+                            settings.animation_fps,
+                            frame_start.elapsed()
+                        ));
+                    }
+                }
             }
         }
 
