@@ -23,6 +23,16 @@ impl Tab {
         (Tab::Lab, "🧪 Effect Lab"),
         (Tab::Advanced, "⚙ Advanced"),
     ];
+
+    fn describe(self) -> &'static str {
+        match self {
+            Tab::Presets => "One-click looks — apply a ready-made style or save your own.",
+            Tab::Ports => "Your hardware: every port and device, what it reacts to, its effect and colors.",
+            Tab::Curves => "Temperature ranges, the color gradient, the global effect, idle mode and effect tuning.",
+            Tab::Lab => "Invent your own effects from building blocks, with a live preview.",
+            Tab::Advanced => "FPS, smoothing, brightness safety — and the fix-it buttons.",
+        }
+    }
 }
 
 pub struct App {
@@ -442,7 +452,7 @@ impl App {
                         } else {
                             button.fill(Color32::TRANSPARENT)
                         };
-                        if ui.add(button).clicked() {
+                        if ui.add(button).on_hover_text(tab.describe()).clicked() {
                             self.tab = tab;
                         }
                     }

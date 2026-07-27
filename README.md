@@ -20,11 +20,18 @@ dark-themed GUI whose live preview is **pixel-identical** to what your LEDs do.
   own effect, colors, friendly name — and its own **component source**:
   **CPU °C, GPU °C, CPU load, GPU load, RAM use, or FPS**. Front fans on GPU
   temp, underglow on CPU temp, a strip that pulses with framerate — mix freely.
-- 🎬 **14 built-in effects**, all temperature-aware:
+- 🎬 **15 built-in effects**, all temperature-aware:
   Thermal Wave (an organic lava-sea flow), **Thermal Fill** (the strip fills
-  0–100% like a thermometer), Ember Flicker, Aurora Drift, Comet Chase, Meteor
-  Shower, Larson Scanner, Plasma, Starfield Twinkle, Rain Drops, Gradient
-  Pulse, Breathing, Spectrum Wave and Solid.
+  0–100% like a thermometer), **Light Trail** (a glowing pulse orbiting the
+  dark strip in endless circles, with Trail-length and Resolution sliders —
+  silky smooth or retro-stepped), Ember Flicker, Aurora Drift, Comet Chase,
+  Meteor Shower, Larson Scanner, Plasma, Starfield Twinkle, Rain Drops,
+  Gradient Pulse, Breathing, Spectrum Wave and Solid.
+- 🫧 **Seamless transitions** — whenever a zone's look changes (idle mode
+  kicking in, a preset applied, effects or colors switched) the old look
+  crossfades into the new one over ~0.7 s. No hard cuts, no flicker.
+- 🖥 **60 FPS by default** — monitor-smooth animation, with identical-frame
+  deduplication so a static look still costs zero traffic.
 - 🎛 **Per-effect tuning** — every effect remembers its own Speed, Intensity and
   Style variant (Lava Sea vs Classic Wave, Calm vs Heartbeat breathing, Single
   vs Twin comets, Glowing Coals vs Wildfire…).

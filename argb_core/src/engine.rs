@@ -333,6 +333,49 @@ pub fn render_zone(
                 out.push(finish(thermal_color(colors, temp), brightness * level.min(1.0)));
             }
         }
+        EffectsMode::LightTrail => {
+            // A glowing pulse orbits the otherwise-dark strip in endless
+            // circles. The trail rises and falls symmetrically (a smooth
+            // cosine bump — the "0123456789876543210" shape), and its colors
+            // slide along the selected gradient: bright head = the current
+            // temperature color, edges fade toward the cold end.
+            // Intensity = trail length; Detail = brightness resolution
+            // (1.0 perfectly smooth, lower = visible retro steps).
+            let rate = 0.20 + temp * 0.5;
+            let head = (t * rate).fract();
+            let trail = 0.06 + 0.44 * k;
+            let steps = (3.0 + tuning.detail * 29.0).round();
+            let smooth = tuning.detail >= 0.999;
+            for i in 0..led_count {
+                let x = i as f32 / n;
+                // Circular distance so the trail wraps seamlessly.
+                let d1 = {
+                    let d = (x - head).abs();
+                    d.min(1.0 - d)
+                };
+                let bump = |d: f32| -> f32 {
+                    if d < trail {
+                        0.5 + 0.5 * (std::f32::consts::PI * d / trail).cos()
+                    } else {
+                        0.0
+                    }
+                };
+                let mut level = bump(d1);
+                if tuning.variant == 1 {
+                    let head2 = (head + 0.5).fract();
+                    let d2 = {
+                        let d = (x - head2).abs();
+                        d.min(1.0 - d)
+                    };
+                    level = level.max(bump(d2));
+                }
+                if !smooth {
+                    level = (level * steps).round() / steps;
+                }
+                let ti = (temp * (0.25 + 0.75 * level)).clamp(0.0, 1.0);
+                out.push(finish(thermal_color(colors, ti), brightness * level));
+            }
+        }
         EffectsMode::RainDrops => {
             // Drops land at pseudo-random spots and ripple outward, fading.
             let drops = if tuning.variant == 1 { 6 } else { 3 };
@@ -483,6 +526,65 @@ pub struct SourceValues {
     pub raw: [f32; 6],
 }
 
+/// Fingerprint of everything that determines a zone's rendered LOOK (not its
+/// animation phase): resolved effect, idle state, colors, tuning, brightness.
+/// When this changes between frames, the renderer should crossfade instead of
+/// hard-cutting. Kept in sync with `render_zone_config`'s resolution logic.
+pub fn style_key(settings: &Settings, zone: &ZoneConfig, sources: &SourceValues) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+
+    let idx = zone.target_source.index();
+    let raw = sources.raw[idx];
+    let idle_active =
+        settings.idle_enabled && raw >= settings.idle_temp_min && raw <= settings.idle_temp_max;
+    idle_active.hash(&mut h);
+    settings.global_brightness.to_bits().hash(&mut h);
+    zone.enabled.hash(&mut h);
+
+    let custom_name = if idle_active {
+        settings.idle_custom_effect.as_deref()
+    } else {
+        zone.custom_effect.as_deref().or(if zone.effect_override.is_none() {
+            settings.global_custom_effect.as_deref()
+        } else {
+            None
+        })
+    };
+    if let Some(fx) = custom_name.and_then(|name| settings.custom_effect(name)) {
+        1u8.hash(&mut h);
+        fx.name.hash(&mut h);
+        for (pos, color) in &fx.palette {
+            pos.to_bits().hash(&mut h);
+            color.hash(&mut h);
+        }
+        format!("{:?}{:?}{:?}", fx.motion, fx.overlay, fx.thermal).hash(&mut h);
+        fx.reverse.hash(&mut h);
+        fx.speed.to_bits().hash(&mut h);
+        fx.scale.to_bits().hash(&mut h);
+        fx.overlay_strength.to_bits().hash(&mut h);
+    } else {
+        let mode = if idle_active {
+            settings.idle_effect
+        } else {
+            zone.effect_override.unwrap_or(settings.effects_mode)
+        };
+        let colors = zone.colors_override.unwrap_or(settings.colors);
+        let tuning = settings.tuning(mode);
+        0u8.hash(&mut h);
+        format!("{mode:?}").hash(&mut h);
+        colors.cold_color.hash(&mut h);
+        colors.warm_color.hash(&mut h);
+        colors.hot_color.hash(&mut h);
+        tuning.speed.to_bits().hash(&mut h);
+        tuning.intensity.to_bits().hash(&mut h);
+        tuning.variant.hash(&mut h);
+        tuning.detail.to_bits().hash(&mut h);
+    }
+    h.finish()
+}
+
 /// Render a configured zone: resolves idle mode, custom vs builtin effect,
 /// per-zone colors and its chosen component source. Disabled zones render
 /// black. This is THE render entry point shared by daemon and GUI preview.
@@ -597,6 +699,7 @@ mod tests {
             EffectsMode::Plasma,
             EffectsMode::StarfieldTwinkle,
             EffectsMode::RainDrops,
+            EffectsMode::LightTrail,
         ] {
             let base = render_zone(mode, &c, 60, 2.0, 0.5, 1.0, EffectTuning::default());
             let v1 = EffectTuning { variant: 1, ..EffectTuning::default() };
@@ -681,6 +784,36 @@ mod tests {
         zone.custom_effect = Some("Ghost".into());
         let fallback = render_zone_config(&s, &zone, 4, 0.0, &sv);
         assert_eq!(fallback.len(), 4);
+    }
+
+    #[test]
+    fn style_key_changes_only_when_the_look_changes() {
+        use crate::settings::{Settings, ZoneConfig};
+        let mut s = Settings::default();
+        let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
+        let cool = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 10.0, 10.0, 30.0, 60.0] };
+        let hot = SourceValues { norm: [0.9; 6], raw: [88.0, 80.0, 95.0, 95.0, 60.0, 30.0] };
+
+        // Temperature alone (same effect) must NOT retrigger a fade.
+        assert_eq!(style_key(&s, &zone, &cool), style_key(&s, &zone, &hot));
+
+        // Changing the effect, colors or tuning must.
+        let base = style_key(&s, &zone, &cool);
+        s.effects_mode = EffectsMode::CometChase;
+        assert_ne!(base, style_key(&s, &zone, &cool));
+        s.effects_mode = EffectsMode::ThermalWave;
+        s.colors.hot_color = [1, 2, 3];
+        assert_ne!(base, style_key(&s, &zone, &cool));
+
+        // Idle kicking in flips the key too.
+        let mut s2 = Settings::default();
+        s2.idle_enabled = true;
+        s2.idle_temp_min = 35.0;
+        s2.idle_temp_max = 50.0;
+        assert_ne!(
+            style_key(&s2, &zone, &cool), // 45°C → idle active
+            style_key(&s2, &zone, &hot)   // 88°C → normal effect
+        );
     }
 
     #[test]

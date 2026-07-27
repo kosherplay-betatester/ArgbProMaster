@@ -96,7 +96,7 @@ pub fn apply_builtin(name: &str, s: &mut Settings) -> bool {
             // chasing along the gradient instead of the lava-sea shimmer.
             s.effect_tuning.insert(
                 EffectsMode::ThermalWave,
-                EffectTuning { speed: 1.2, intensity: 0.7, variant: 1 },
+                EffectTuning { speed: 1.2, intensity: 0.7, variant: 1, ..EffectTuning::default() },
             );
         }
         "Cyberpunk 2077" => {
@@ -153,7 +153,7 @@ pub fn apply_builtin(name: &str, s: &mut Settings) -> bool {
             // Wildfire variant: rare white-hot sparks over the coals.
             s.effect_tuning.insert(
                 EffectsMode::EmberFlicker,
-                EffectTuning { speed: 1.0, intensity: 0.65, variant: 1 },
+                EffectTuning { speed: 1.0, intensity: 0.65, variant: 1, ..EffectTuning::default() },
             );
         }
         "Aurora Borealis" => {
@@ -166,7 +166,7 @@ pub fn apply_builtin(name: &str, s: &mut Settings) -> bool {
             };
             s.effect_tuning.insert(
                 EffectsMode::AuroraDrift,
-                EffectTuning { speed: 1.0, intensity: 0.6, variant: 0 },
+                EffectTuning { speed: 1.0, intensity: 0.6, variant: 0, ..EffectTuning::default() },
             );
         }
         "Comet Storm" => {
@@ -179,7 +179,7 @@ pub fn apply_builtin(name: &str, s: &mut Settings) -> bool {
             };
             s.effect_tuning.insert(
                 EffectsMode::CometChase,
-                EffectTuning { speed: 1.2, intensity: 0.6, variant: 1 },
+                EffectTuning { speed: 1.2, intensity: 0.6, variant: 1, ..EffectTuning::default() },
             );
         }
         _ => return false,

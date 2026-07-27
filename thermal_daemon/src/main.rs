@@ -56,6 +56,11 @@ struct ResolvedZone {
     /// Last frame actually sent — identical frames are skipped entirely, so a
     /// static look costs zero traffic (RTSS-style: do nothing unless needed).
     last_frame: Vec<[u8; 3]>,
+    /// Fingerprint of the zone's current look; when it changes we crossfade
+    /// from `fade_from` instead of hard-cutting to the new effect.
+    style_key: u64,
+    fade_from: Vec<[u8; 3]>,
+    fade_start: Option<Instant>,
 }
 
 /// Where the configured zones actually live on the OpenRGB server.
@@ -360,6 +365,9 @@ fn discover(client: &mut OpenRgbClient, settings: &Settings) -> std::io::Result<
                 leds,
                 cfg: cfg_idx,
                 last_frame: Vec::new(),
+                style_key: 0,
+                fade_from: Vec::new(),
+                fade_start: None,
             });
         }
     }
@@ -418,12 +426,46 @@ fn send_frame(
     time: f64,
     sources: &engine::SourceValues,
 ) -> std::io::Result<()> {
+    /// How long a look-change (idle kicking in, preset/effect/color switch)
+    /// melts into the new effect instead of hard-cutting.
+    const STYLE_FADE_SECS: f32 = 0.7;
+
     for zone in map.zones.iter_mut() {
         let Some(cfg) = settings.zones.get(zone.cfg) else {
             continue; // settings shrank since resolve; remap follows shortly
         };
-        let frame =
+
+        // Detect look changes and arm a crossfade from the last shown frame.
+        let key = engine::style_key(settings, cfg, sources);
+        if key != zone.style_key {
+            if !zone.last_frame.is_empty() {
+                zone.fade_from = zone.last_frame.clone();
+                zone.fade_start = Some(Instant::now());
+            }
+            zone.style_key = key;
+        }
+
+        let mut frame =
             engine::render_zone_config(settings, cfg, zone.leds as usize, time, sources);
+
+        if let Some(started) = zone.fade_start {
+            let progress = started.elapsed().as_secs_f32() / STYLE_FADE_SECS;
+            if progress >= 1.0 || zone.fade_from.len() != frame.len() {
+                zone.fade_start = None;
+                zone.fade_from = Vec::new();
+            } else {
+                // Smoothstep blend: old look melts into the new one.
+                let e = progress * progress * (3.0 - 2.0 * progress);
+                for (dst, src) in frame.iter_mut().zip(&zone.fade_from) {
+                    for ch in 0..3 {
+                        let a = src[ch] as f32;
+                        let b = dst[ch] as f32;
+                        dst[ch] = (a + (b - a) * e).round().clamp(0.0, 255.0) as u8;
+                    }
+                }
+            }
+        }
+
         if frame == zone.last_frame {
             continue; // nothing changed — skip the write entirely
         }

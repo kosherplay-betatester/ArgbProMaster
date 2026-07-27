@@ -44,7 +44,11 @@ pub fn presets_tab(app: &mut App, ui: &mut egui::Ui) {
                         ui.set_max_width(card_w);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(preset.emoji).size(22.0));
-                            ui.label(RichText::new(preset.name).strong().size(16.0));
+                            ui.label(RichText::new(preset.name).strong().size(16.0))
+                                .on_hover_text(format!(
+                                    "{} Applying loads it into the editor — your LEDs only change when you Save.",
+                                    preset.tagline
+                                ));
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -388,7 +392,11 @@ fn zone_effect_combo(ui: &mut egui::Ui, zone: &mut ZoneConfig, custom_names: &[S
             }
             for mode in EffectsMode::ALL {
                 let selected = zone.custom_effect.is_none() && zone.effect_override == Some(mode);
-                if ui.selectable_label(selected, mode.label()).clicked() {
+                if ui
+                    .selectable_label(selected, mode.label())
+                    .on_hover_text(mode.describe())
+                    .clicked()
+                {
                     zone.effect_override = Some(mode);
                     zone.custom_effect = None;
                 }
@@ -519,7 +527,11 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
             .show_ui(ui, |ui| {
                 for mode in EffectsMode::ALL {
                     let selected = s.global_custom_effect.is_none() && s.effects_mode == mode;
-                    if ui.selectable_label(selected, mode.label()).clicked() {
+                    if ui
+                        .selectable_label(selected, mode.label())
+                        .on_hover_text(mode.describe())
+                        .clicked()
+                    {
                         s.effects_mode = mode;
                         s.global_custom_effect = None;
                     }
@@ -601,7 +613,11 @@ fn idle_effect_card(app: &mut App, ui: &mut egui::Ui) {
                 .show_ui(ui, |ui| {
                     for mode in EffectsMode::ALL {
                         let is = s.idle_custom_effect.is_none() && s.idle_effect == mode;
-                        if ui.selectable_label(is, mode.label()).clicked() {
+                        if ui
+                            .selectable_label(is, mode.label())
+                            .on_hover_text(mode.describe())
+                            .clicked()
+                        {
                             s.idle_effect = mode;
                             s.idle_custom_effect = None;
                         }
@@ -661,13 +677,27 @@ fn effect_tuning_card(app: &mut App, ui: &mut egui::Ui) {
             .add(
                 egui::Slider::new(&mut tuning.intensity, 0.0..=1.0)
                     .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                    .text("Intensity"),
+                    .text(mode.intensity_label()),
             )
             .on_hover_text(
                 "How pronounced the motion is — color spread, shimmer depth, tail length, \
                  flicker strength… each effect interprets it its own way. 50% is the stock look.",
             )
             .changed();
+
+        if let Some(detail_label) = mode.detail_label() {
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut tuning.detail, 0.0..=1.0)
+                        .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                        .text(detail_label),
+                )
+                .on_hover_text(
+                    "Brightness resolution of the trail: 100% is perfectly smooth; \
+                     lower values quantize it into visible retro steps (the classic 0-9 look).",
+                )
+                .changed();
+        }
 
         let variants = mode.variant_labels();
         if !variants.is_empty() {
@@ -724,7 +754,7 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("Animation Engine").strong());
         ui.add(egui::Slider::new(&mut app.settings.animation_fps, 5..=60).text("FPS"))
-            .on_hover_text("How many frames per second the daemon renders. 15 FPS is silky and nearly free; higher is smoother still at slightly more CPU.");
+            .on_hover_text("How many frames per second the daemon renders. 60 FPS feels monitor-smooth (the default); lower it if an older LED controller can't keep up.");
         ui.add(
             egui::Slider::new(&mut app.settings.smoothing_speed, 0.01..=0.5)
                 .logarithmic(true)

@@ -20,10 +20,11 @@ pub enum EffectsMode {
     Plasma,
     StarfieldTwinkle,
     RainDrops,
+    LightTrail,
 }
 
 impl EffectsMode {
-    pub const ALL: [EffectsMode; 14] = [
+    pub const ALL: [EffectsMode; 15] = [
         EffectsMode::ThermalWave,
         EffectsMode::ThermalFill,
         EffectsMode::GradientPulse,
@@ -38,6 +39,7 @@ impl EffectsMode {
         EffectsMode::Plasma,
         EffectsMode::StarfieldTwinkle,
         EffectsMode::RainDrops,
+        EffectsMode::LightTrail,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -56,6 +58,7 @@ impl EffectsMode {
             EffectsMode::Plasma => "Plasma",
             EffectsMode::StarfieldTwinkle => "Starfield Twinkle",
             EffectsMode::RainDrops => "Rain Drops",
+            EffectsMode::LightTrail => "Light Trail",
         }
     }
 
@@ -75,6 +78,7 @@ impl EffectsMode {
             EffectsMode::Plasma => "Slowly swirling interference of your three colors, like liquid light.",
             EffectsMode::StarfieldTwinkle => "A dark sky where stars twinkle in and out, colored by temperature.",
             EffectsMode::RainDrops => "Drops splash onto the strip and ripple outward before fading.",
+            EffectsMode::LightTrail => "A glowing trail orbits the dark strip in endless circles — smooth gradient tail on both sides, colored by your scheme.",
         }
     }
 
@@ -94,7 +98,25 @@ impl EffectsMode {
             EffectsMode::Plasma => &["Smooth", "Electric"],
             EffectsMode::StarfieldTwinkle => &["Calm Stars", "Shooting Stars"],
             EffectsMode::RainDrops => &["Drizzle", "Storm"],
+            EffectsMode::LightTrail => &["Single Trail", "Twin Trails"],
             EffectsMode::GradientPulse | EffectsMode::Solid => &[],
+        }
+    }
+
+    /// Label for the Intensity slider when an effect gives it a more
+    /// specific meaning.
+    pub fn intensity_label(&self) -> &'static str {
+        match self {
+            EffectsMode::LightTrail => "Trail length",
+            _ => "Intensity",
+        }
+    }
+
+    /// Effects that use the extra Detail knob expose it under this label.
+    pub fn detail_label(&self) -> Option<&'static str> {
+        match self {
+            EffectsMode::LightTrail => Some("Resolution"),
+            _ => None,
         }
     }
 }
@@ -109,11 +131,15 @@ pub struct EffectTuning {
     pub intensity: f32,
     /// Index into `EffectsMode::variant_labels`.
     pub variant: u32,
+    /// Extra per-effect knob (see `EffectsMode::detail_label`), 0–1.
+    /// Light Trail: brightness resolution — 1.0 is perfectly smooth,
+    /// lower values quantize the trail into visible retro steps.
+    pub detail: f32,
 }
 
 impl Default for EffectTuning {
     fn default() -> Self {
-        EffectTuning { speed: 1.0, intensity: 0.5, variant: 0 }
+        EffectTuning { speed: 1.0, intensity: 0.5, variant: 0, detail: 1.0 }
     }
 }
 
@@ -121,6 +147,7 @@ impl EffectTuning {
     pub fn clamped(mut self, mode: EffectsMode) -> Self {
         self.speed = self.speed.clamp(0.25, 3.0);
         self.intensity = self.intensity.clamp(0.0, 1.0);
+        self.detail = self.detail.clamp(0.0, 1.0);
         let variants = mode.variant_labels().len().max(1) as u32;
         self.variant = self.variant.min(variants - 1);
         self
@@ -551,8 +578,9 @@ impl Default for Settings {
         Settings {
             active_preset: "Thermal Alert".to_string(),
             global_brightness: DEFAULT_BRIGHTNESS,
-            animation_fps: 15,
-            smoothing_speed: 0.05,
+            // Monitor-smooth by default; frame dedup keeps idle cost near zero.
+            animation_fps: 60,
+            smoothing_speed: 0.02,
             effects_mode: EffectsMode::ThermalWave,
             cpu_temp_min: 40.0,
             cpu_temp_max: 85.0,
@@ -835,7 +863,7 @@ mod tests {
         let mut s = Settings::default();
         s.effect_tuning.insert(
             EffectsMode::CometChase,
-            EffectTuning { speed: 2.0, intensity: 0.8, variant: 1 },
+            EffectTuning { speed: 2.0, intensity: 0.8, variant: 1, ..EffectTuning::default() },
         );
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
@@ -864,7 +892,7 @@ mod tests {
         let mut s = Settings::default();
         s.effect_tuning.insert(
             EffectsMode::Solid,
-            EffectTuning { speed: 99.0, intensity: -1.0, variant: 7 },
+            EffectTuning { speed: 99.0, intensity: -1.0, variant: 7, ..EffectTuning::default() },
         );
         s.normalize();
         let t = s.effect_tuning[&EffectsMode::Solid];
