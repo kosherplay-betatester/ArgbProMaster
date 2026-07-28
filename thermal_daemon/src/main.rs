@@ -65,10 +65,11 @@ struct ResolvedZone {
     /// range boundary must not flip the look every frame (= flicker).
     idle_state: bool,
     idle_changed: Option<Instant>,
-    /// GPU (I2C) and DRAM (SMBus) zones live on slow buses: pushing them at
-    /// full frame rate backs up OpenRGB's queue until the socket times out —
-    /// a 16-second reconnect loop that strobes everything. Rate-limit them.
-    slow_bus: bool,
+    /// Minimum time between updates for this zone. GPU (I2C) and DRAM
+    /// (SMBus) writes can take 100–500 ms EACH; anything faster than these
+    /// caps backs up OpenRGB's queue until the socket times out — a
+    /// 16-second reconnect loop that strobes everything. Zero = full rate.
+    min_interval: Duration,
     last_sent: Option<Instant>,
 }
 
@@ -398,7 +399,11 @@ fn discover(client: &mut OpenRgbClient, settings: &Settings) -> std::io::Result<
                 fade_start: None,
                 idle_state: false,
                 idle_changed: None,
-                slow_bus: matches!(cfg.device_type, 1 | 2), // DRAM / GPU
+                min_interval: match cfg.device_type {
+                    1 => Duration::from_millis(2500), // DRAM / SMBus: glacial
+                    2 => Duration::from_millis(1000), // GPU / I2C: slow
+                    _ => Duration::ZERO,              // motherboard HID: fast
+                },
                 last_sent: None,
             });
         }
@@ -529,15 +534,12 @@ fn send_frame(
         if frame == zone.last_frame {
             continue; // nothing changed — skip the write entirely
         }
-        // Slow buses get at most 2 updates/sec — NvAPI I2C writes can take
-        // 100ms+ each, so anything faster still floods OpenRGB's queue into
-        // a reconnect loop. The animation math stays per-frame, so when
-        // their turn comes they show the freshest colors.
-        const SLOW_BUS_INTERVAL: Duration = Duration::from_millis(500);
-        if zone.slow_bus
+        // Per-bus speed limits: the animation math stays per-frame, so when
+        // a slow zone's turn comes it shows the freshest colors.
+        if !zone.min_interval.is_zero()
             && zone
                 .last_sent
-                .map(|t| t.elapsed() < SLOW_BUS_INTERVAL)
+                .map(|t| t.elapsed() < zone.min_interval)
                 .unwrap_or(false)
         {
             continue;
