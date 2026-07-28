@@ -13,6 +13,18 @@ preview that is **pixel-identical** to your LEDs.
 
 ---
 
+## 📸 A look inside
+
+![Presets & Themes — one-click looks with live LED preview](docs/screenshots/presets.png)
+
+| 🔌 Every zone, auto-detected | 🌡 Curves, colors & idle |
+|---|---|
+| ![Zones & Ports](docs/screenshots/zones.png) | ![Thermal Curves](docs/screenshots/thermal-curves.png) |
+
+![Effect Lab — build your own effects from blocks, live](docs/screenshots/effect-lab.png)
+
+---
+
 ## 🚀 Install (the easy way)
 
 **Download `ArgbProMaster-Setup.exe` from the
