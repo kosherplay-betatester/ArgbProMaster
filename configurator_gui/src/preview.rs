@@ -48,16 +48,24 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 let v = app.sim_other;
                 (v, v, v, v * 2.4, 240.0)
             };
+            let norm = [
+                cpu_n,
+                gpu_n,
+                (cl / 100.0).clamp(0.0, 1.0),
+                (gl / 100.0).clamp(0.0, 1.0),
+                (ram / 100.0).clamp(0.0, 1.0),
+                (fps / fps_max).clamp(0.0, 1.0),
+            ];
+            // Integrate the thermal clocks exactly like the daemon does, so
+            // preview motion accelerates with heat without ever jumping.
+            let dt = ui.input(|i| i.stable_dt).min(0.1);
+            for i in 0..norm.len() {
+                app.sim_phase[i] += dt * (0.5 + 1.5 * norm[i]);
+            }
             let sources = engine::SourceValues {
                 raw: [app.sim_cpu_smooth, app.sim_gpu_smooth, cl, gl, ram, fps],
-                norm: [
-                    cpu_n,
-                    gpu_n,
-                    (cl / 100.0).clamp(0.0, 1.0),
-                    (gl / 100.0).clamp(0.0, 1.0),
-                    (ram / 100.0).clamp(0.0, 1.0),
-                    (fps / fps_max).clamp(0.0, 1.0),
-                ],
+                norm,
+                phase: app.sim_phase,
             };
 
             let enabled: Vec<&argb_core::settings::ZoneConfig> = s

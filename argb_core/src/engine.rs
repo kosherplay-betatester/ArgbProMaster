@@ -65,6 +65,31 @@ pub fn blend_srgb(from: [u8; 3], to: [u8; 3], t: f32) -> [u8; 3] {
     ]
 }
 
+/// Photosensitive-safety slew limiter: clamp how far a pixel may move toward
+/// its target this frame, in linear light. With `max_step` sized so a full
+/// black↔white swing takes ≥ ~0.35 s, strobe-like flashing is physically
+/// impossible at the output stage — regardless of what any effect,
+/// transition, or bug upstream produces.
+pub fn slew_limit(prev: [u8; 3], target: [u8; 3], max_step: f32) -> [u8; 3] {
+    let max_step = max_step.clamp(0.0, 1.0);
+    let mut out = [0u8; 3];
+    for ch in 0..3 {
+        let a = srgb_to_linear(prev[ch] as f32);
+        let b = srgb_to_linear(target[ch] as f32);
+        let clamped = a + (b - a).clamp(-max_step, max_step);
+        out[ch] = linear_to_srgb(clamped).round().clamp(0.0, 255.0) as u8;
+    }
+    // Quantization must never stall convergence: if we're limited but the
+    // rounding landed us exactly on prev while the target differs, take the
+    // minimal 1-count step toward the target.
+    for ch in 0..3 {
+        if out[ch] == prev[ch] && target[ch] != prev[ch] {
+            out[ch] = if target[ch] > prev[ch] { prev[ch] + 1 } else { prev[ch] - 1 };
+        }
+    }
+    out
+}
+
 /// Map a normalized temperature (0 = cold, 1 = hot) onto the three-stop
 /// cold -> warm -> hot gradient.
 pub fn thermal_color(colors: &ColorConfig, t: f32) -> [f32; 3] {
@@ -132,15 +157,24 @@ fn flicker(i: usize, ft: f32) -> f32 {
 
 /// Render one frame for a zone.
 ///
-/// * `time` — seconds since the animation started.
-/// * `temp` — smoothed, normalized temperature in 0..1.
+/// * `time` — seconds since the animation started (for motion that must NOT
+///   react to temperature, e.g. the Spectrum rainbow).
+/// * `phase` — the zone's integrated "thermal clock": the caller accumulates
+///   `phase += dt * (0.5 + 1.5 * temp_norm)` every frame. Effects use it for
+///   temperature-reactive motion; because it is integrated, a temperature
+///   spike ACCELERATES the animation but can never make the pattern jump —
+///   multiplying absolute time by a temp-dependent speed teleports the
+///   pattern on every temp change (the old "sudden flicker" bug).
+/// * `temp` — smoothed, normalized temperature in 0..1 (for colors).
 /// * `brightness` — global brightness multiplier in 0..1.
 /// * `tuning` — per-effect speed/intensity/variant; defaults keep stock looks.
+#[allow(clippy::too_many_arguments)]
 pub fn render_zone(
     mode: EffectsMode,
     stops: &[(f32, [u8; 3])],
     led_count: usize,
     time: f64,
+    phase: f32,
     temp: f32,
     brightness: f32,
     tuning: EffectTuning,
@@ -150,7 +184,9 @@ pub fn render_zone(
     }
     let temp = temp.clamp(0.0, 1.0);
     let tuning = tuning.clamped(mode);
-    let t = time as f32 * tuning.speed;
+    // Temp-reactive motion clock (jump-free) and flat wall clock.
+    let t = phase * tuning.speed;
+    let t_flat = time as f32 * tuning.speed;
     let k = tuning.intensity;
     let n = led_count as f32;
     let tau = std::f32::consts::TAU;
@@ -163,7 +199,7 @@ pub fn render_zone(
         }
         EffectsMode::Breathing => {
             // Breathe a little faster as things heat up.
-            let freq = 0.9 + temp * 1.6;
+            let freq = 1.5; // temp reactivity now lives in the phase clock
             // Intensity controls how deep each breath dips (stock 0.30 floor).
             let floor = (1.0 - 1.4 * k).clamp(0.05, 1.0);
             let breath = match tuning.variant {
@@ -187,7 +223,7 @@ pub fn render_zone(
             match tuning.variant {
                 // Classic Wave: one gentle traveling sine.
                 1 => {
-                    let speed = 0.5 + temp * 2.0;
+                    let speed = 1.2;
                     for i in 0..led_count {
                         let wave = ((i as f32 / n) * tau * 1.5 - t * speed).sin();
                         let ti = (temp + wave * spread).clamp(0.0, 1.0);
@@ -199,7 +235,7 @@ pub fn render_zone(
                 // frequencies, the middle one flowing against the others, so
                 // crests emerge and dissolve instead of repeating.
                 _ => {
-                    let drift = 0.35 + temp * 1.4;
+                    let drift = 0.8;
                     for i in 0..led_count {
                         let x = i as f32 / n;
                         let swell = (x * tau - t * drift).sin();
@@ -219,7 +255,7 @@ pub fn render_zone(
             // temperature rises, with a soft global pulse layered on top.
             // Intensity sets pulse depth (stock 0.25 at k = 0.5).
             let depth = 0.5 * k;
-            let pulse = (1.0 - depth) + depth * (t * 2.0).sin();
+            let pulse = (1.0 - depth) + depth * (t_flat * 2.0).sin();
             for i in 0..led_count {
                 let g = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
                 let ti = g * temp;
@@ -232,13 +268,13 @@ pub fn render_zone(
             let density = 2.0 * k;
             let sat = if tuning.variant == 1 { 0.55 } else { 1.0 };
             for i in 0..led_count {
-                let hue = (i as f32 / n * density + t * 0.12).fract() * 360.0;
+                let hue = (i as f32 / n * density + t_flat * 0.12).fract() * 360.0;
                 out.push(finish(hsv_to_rgb(hue, sat, 1.0), brightness));
             }
         }
         EffectsMode::EmberFlicker => {
             // Each LED wanders like a glowing coal; hotter = livelier embers.
-            let rate = 1.5 + temp * 4.0;
+            let rate = 3.0;
             let depth = 0.25 + 0.60 * k;
             let ft = t * rate;
             for i in 0..led_count {
@@ -255,7 +291,7 @@ pub fn render_zone(
         }
         EffectsMode::AuroraDrift => {
             // Slow counter-drifting curtains — the calmest effect of the set.
-            let drift = (0.10 + temp * 0.25) * if tuning.variant == 1 { 1.6 } else { 1.0 };
+            let drift = 0.18 * if tuning.variant == 1 { 1.6 } else { 1.0 };
             let spread = 0.10 + 0.25 * k;
             for i in 0..led_count {
                 let x = i as f32 / n;
@@ -273,7 +309,7 @@ pub fn render_zone(
         EffectsMode::CometChase => {
             // A bright head sweeping the strip with an exponential tail.
             // Intensity sets tail length; temperature sets sweep rate.
-            let cycles = 0.25 + temp * 0.55;
+            let cycles = 0.5;
             let tail = 0.06 + 0.30 * k;
             let head = (t * cycles).fract();
             for i in 0..led_count {
@@ -296,7 +332,7 @@ pub fn render_zone(
             // so the head always shows "how hot" at a glance.
             let fill = temp.max(0.02);
             let soft = 0.02 + 0.10 * k;
-            let head_pulse = 0.85 + 0.15 * (t * 2.0).sin();
+            let head_pulse = 0.85 + 0.15 * (t_flat * 2.0).sin();
             for i in 0..led_count {
                 let x = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
                 // Center Bloom fills outward from the middle of the strip.
@@ -313,7 +349,7 @@ pub fn render_zone(
             // Several meteors, each with its own offset and (in Chaotic) its
             // own pace, streaking with exponential trails.
             let meteors = 2 + (k * 4.0) as u32;
-            let rate = 0.15 + temp * 0.35;
+            let rate = 0.30;
             let tail = 0.05 + 0.12 * k;
             for i in 0..led_count {
                 let x = i as f32 / n;
@@ -331,7 +367,7 @@ pub fn render_zone(
         }
         EffectsMode::LarsonScanner => {
             // A glowing eye bouncing end to end; faster and wider when hot.
-            let rate = 0.35 + temp * 0.5;
+            let rate = 0.55;
             let width = 0.03 + 0.09 * k;
             let p = (t * rate).fract();
             let pos = 1.0 - (1.0 - 2.0 * p).abs();
@@ -363,7 +399,7 @@ pub fn render_zone(
         EffectsMode::StarfieldTwinkle => {
             // Sparse stars twinkling over a near-dark sky.
             let density = 0.12 + 0.28 * k;
-            let twinkle_rate = 0.8 + temp * 1.2;
+            let twinkle_rate = 1.4;
             for i in 0..led_count {
                 let is_star = hash01(i as f32 * 17.77) < density;
                 let mut level = 0.05;
@@ -388,7 +424,7 @@ pub fn render_zone(
             // temperature color, edges fade toward the cold end.
             // Intensity = trail length; Detail = brightness resolution
             // (1.0 perfectly smooth, lower = visible retro steps).
-            let rate = 0.20 + temp * 0.5;
+            let rate = 0.45;
             let head = (t * rate).fract();
             let trail = 0.06 + 0.44 * k;
             let steps = (3.0 + tuning.detail * 29.0).round();
@@ -426,8 +462,8 @@ pub fn render_zone(
         EffectsMode::Fireworks => {
             // Rockets climb the strip, then burst into sparkles that fade.
             // Heat launches more rockets; intensity sets burst size.
-            let rockets = if tuning.variant == 1 { 4 } else { 2 } + (temp * 3.0) as u32;
-            let cycle_rate = 0.35 + temp * 0.4;
+            let rockets = if tuning.variant == 1 { 5 } else { 3 };
+            let cycle_rate = 0.55;
             let burst_size = 0.05 + 0.15 * k;
             for i in 0..led_count {
                 let x = i as f32 / n;
@@ -464,7 +500,7 @@ pub fn render_zone(
         }
         EffectsMode::WaveCollide => {
             // Two pulses race in from the ends; where they meet, a splash.
-            let rate = 0.30 + temp * 0.45;
+            let rate = 0.5;
             let phase = (t * rate).fract();
             let width = 0.04 + 0.10 * k;
             // Ping Pong: after colliding they bounce back out.
@@ -489,7 +525,7 @@ pub fn render_zone(
         EffectsMode::RainDrops => {
             // Drops land at pseudo-random spots and ripple outward, fading.
             let drops = if tuning.variant == 1 { 6 } else { 3 };
-            let rate = if tuning.variant == 1 { 0.7 } else { 0.4 } + temp * 0.4;
+            let rate = if tuning.variant == 1 { 0.9 } else { 0.6 };
             for i in 0..led_count {
                 let x = i as f32 / n;
                 let mut glow: f32 = 0.0;
@@ -535,10 +571,13 @@ pub fn palette_color(palette: &[(f32, [u8; 3])], t: f32) -> [f32; 3] {
 
 /// Render one frame of an Effect Lab custom effect. Deterministic, like the
 /// builtin effects, so the GUI preview matches the LEDs exactly.
+/// `phase` is the caller-integrated thermal clock (see [`render_zone`]) used
+/// by the "Speed follows temperature" binding — jump-free under temp spikes.
 pub fn render_custom(
     fx: &CustomEffect,
     led_count: usize,
     time: f64,
+    phase: f32,
     temp: f32,
     brightness: f32,
 ) -> Vec<[u8; 3]> {
@@ -546,8 +585,8 @@ pub fn render_custom(
         return Vec::new();
     }
     let temp = temp.clamp(0.0, 1.0);
-    let speed_boost = if fx.thermal == ThermalBind::Speed { 0.5 + temp * 1.5 } else { 1.0 };
-    let t = time as f32 * fx.speed.clamp(0.25, 3.0) * speed_boost;
+    let base = if fx.thermal == ThermalBind::Speed { phase } else { time as f32 };
+    let t = base * fx.speed.clamp(0.25, 3.0);
     let n = led_count as f32;
     let scale = fx.scale.clamp(0.0, 1.0);
     let tau = std::f32::consts::TAU;
@@ -634,6 +673,10 @@ pub fn render_custom(
 pub struct SourceValues {
     pub norm: [f32; 6],
     pub raw: [f32; 6],
+    /// Integrated per-source thermal clocks: `phase[i] += dt * (0.5 +
+    /// 1.5 * norm[i])` each frame. Continuous by construction, so effects
+    /// accelerate with heat without ever jumping (see `render_zone`).
+    pub phase: [f32; 6],
 }
 
 /// Fingerprint of everything that determines a zone's rendered LOOK (not its
@@ -736,6 +779,7 @@ pub fn render_zone_config(
     }
     let idx = zone.target_source.index();
     let temp = sources.norm[idx];
+    let ph = sources.phase[idx];
 
     // Idle mode: the calmer idle look, chosen with hysteresis by the caller.
     // It can carry its own colors and pace, falling back to the zone's.
@@ -745,7 +789,7 @@ pub fn render_zone_config(
             .as_deref()
             .and_then(|name| settings.custom_effect(name))
         {
-            return render_custom(fx, led_count, time, temp, settings.global_brightness);
+            return render_custom(fx, led_count, time, ph, temp, settings.global_brightness);
         }
         let mode = settings.idle_effect;
         let stops = match (settings.idle_colors, zone.colors_override) {
@@ -754,7 +798,7 @@ pub fn render_zone_config(
             (None, None) => settings.journey_stops(),
         };
         let tuning = settings.idle_tuning.unwrap_or_else(|| settings.tuning(mode));
-        return render_zone(mode, &stops, led_count, time, temp, settings.global_brightness, tuning);
+        return render_zone(mode, &stops, led_count, time, ph, temp, settings.global_brightness, tuning);
     }
 
     // Custom effect resolution: zone-level name, else the global custom
@@ -765,7 +809,7 @@ pub fn render_zone_config(
         None
     });
     if let Some(fx) = custom_name.and_then(|name| settings.custom_effect(name)) {
-        return render_custom(fx, led_count, time, temp, settings.global_brightness);
+        return render_custom(fx, led_count, time, ph, temp, settings.global_brightness);
     }
 
     let mode = zone.effect_override.unwrap_or(settings.effects_mode);
@@ -774,7 +818,7 @@ pub fn render_zone_config(
         None => settings.journey_stops(),
     };
     let tuning = settings.tuning(mode);
-    render_zone(mode, &stops, led_count, time, temp, settings.global_brightness, tuning)
+    render_zone(mode, &stops, led_count, time, ph, temp, settings.global_brightness, tuning)
 }
 
 #[cfg(test)]
@@ -796,12 +840,12 @@ mod tests {
         for mode in EffectsMode::ALL {
             for variant in 0..mode.variant_labels().len().max(1) as u32 {
                 let tuning = EffectTuning { variant, ..EffectTuning::default() };
-                let frame = render_zone(mode, &c.stops(), 72, 1.25, 0.5, 0.0, tuning);
+                let frame = render_zone(mode, &c.stops(), 72, 1.25, 1.25, 0.5, 0.0, tuning);
                 assert_eq!(frame.len(), 72);
                 assert!(frame.iter().all(|px| *px == [0, 0, 0]), "{mode:?} v{variant}");
             }
         }
-        let empty = render_zone(EffectsMode::Solid, &c.stops(), 0, 0.0, 0.0, 1.0, EffectTuning::default());
+        let empty = render_zone(EffectsMode::Solid, &c.stops(), 0, 0.0, 0.0, 0.0, 1.0, EffectTuning::default());
         assert!(empty.is_empty());
     }
 
@@ -810,8 +854,8 @@ mod tests {
         let c = ColorConfig::default();
         for mode in EffectsMode::ALL {
             let t = EffectTuning::default();
-            let a = render_zone(mode, &c.stops(), 48, 3.7, 0.4, 0.8, t);
-            let b = render_zone(mode, &c.stops(), 48, 3.7, 0.4, 0.8, t);
+            let a = render_zone(mode, &c.stops(), 48, 3.7, 3.7, 0.4, 0.8, t);
+            let b = render_zone(mode, &c.stops(), 48, 3.7, 3.7, 0.4, 0.8, t);
             assert_eq!(a, b, "{mode:?} must render identically for equal inputs");
         }
     }
@@ -843,17 +887,19 @@ mod tests {
             EffectsMode::Fireworks,
             EffectsMode::WaveCollide,
         ] {
-            let base = render_zone(mode, &c.stops(), 60, 2.0, 0.5, 1.0, EffectTuning::default());
+            // Non-round phase so speed multipliers can't alias onto the same
+            // fractional cycle position.
+            let base = render_zone(mode, &c.stops(), 60, 2.0, 2.3, 0.5, 1.0, EffectTuning::default());
             let v1 = EffectTuning { variant: 1, ..EffectTuning::default() };
             assert_ne!(
                 base,
-                render_zone(mode, &c.stops(), 60, 2.0, 0.5, 1.0, v1),
+                render_zone(mode, &c.stops(), 60, 2.0, 2.3, 0.5, 1.0, v1),
                 "{mode:?} variant 1 should look different"
             );
             let fast = EffectTuning { speed: 3.0, ..EffectTuning::default() };
             assert_ne!(
                 base,
-                render_zone(mode, &c.stops(), 60, 2.0, 0.5, 1.0, fast),
+                render_zone(mode, &c.stops(), 60, 2.0, 2.3, 0.5, 1.0, fast),
                 "{mode:?} speed should shift the animation"
             );
         }
@@ -881,6 +927,25 @@ mod tests {
         // Degenerate palettes never panic.
         assert_eq!(palette_color(&[], 0.5), [255.0, 255.0, 255.0]);
         assert_eq!(palette_color(&[(0.3, [9, 9, 9])], 0.9), [9.0, 9.0, 9.0]);
+    }
+
+    #[test]
+    fn slew_limit_caps_sudden_flashes() {
+        // A full black→white demand with a small step budget must move only
+        // a little — never a strobe-like jump.
+        let step = slew_limit([0, 0, 0], [255, 255, 255], 0.05);
+        assert!(step[0] > 0 && step[0] < 160, "capped step, got {}", step[0]);
+        // Repeated application converges to the target (no stalls).
+        let mut px = [0u8, 0, 0];
+        let mut iterations = 0;
+        while px != [255, 255, 255] && iterations < 200 {
+            px = slew_limit(px, [255, 255, 255], 0.05);
+            iterations += 1;
+        }
+        assert_eq!(px, [255, 255, 255], "converges");
+        assert!(iterations >= 15, "took {iterations} steps — a flash must span many frames");
+        // Small changes pass through untouched.
+        assert_eq!(slew_limit([100, 100, 100], [101, 100, 99], 0.05), [101, 100, 99]);
     }
 
     #[test]
@@ -913,17 +978,17 @@ mod tests {
                         thermal,
                         ..CustomEffect::default()
                     };
-                    let a = render_custom(&fx, 40, 2.5, 0.4, 0.8);
-                    let b = render_custom(&fx, 40, 2.5, 0.4, 0.8);
+                    let a = render_custom(&fx, 40, 2.5, 2.5, 0.4, 0.8);
+                    let b = render_custom(&fx, 40, 2.5, 2.5, 0.4, 0.8);
                     assert_eq!(a.len(), 40);
                     assert_eq!(a, b, "{motion:?}/{overlay:?}/{thermal:?}");
                     // Zero brightness must always be black.
-                    let dark = render_custom(&fx, 40, 2.5, 0.4, 0.0);
+                    let dark = render_custom(&fx, 40, 2.5, 2.5, 0.4, 0.0);
                     assert!(dark.iter().all(|px| *px == [0, 0, 0]));
                 }
             }
         }
-        assert!(render_custom(&CustomEffect::default(), 0, 0.0, 0.0, 1.0).is_empty());
+        assert!(render_custom(&CustomEffect::default(), 0, 0.0, 0.0, 0.0, 1.0).is_empty());
     }
 
     #[test]
@@ -938,7 +1003,7 @@ mod tests {
             ..CustomEffect::default()
         });
         let mut zone = ZoneConfig { enabled: true, custom_effect: Some("Mine".into()), ..ZoneConfig::default() };
-        let sv = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 20.0, 20.0, 20.0, 60.0] };
+        let sv = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 20.0, 20.0, 20.0, 60.0], phase: [1.0; 6] };
         let frame = render_zone_config(&s, &zone, 4, 0.0, &sv, false);
         // Full-brightness custom palette color scaled by global brightness 0.70.
         assert_eq!(frame[0], [0, 1, 2]);
@@ -964,7 +1029,7 @@ mod tests {
         s.global_brightness = 1.0;
         s.safety_power_lock = false;
         let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
-        let sv = SourceValues { norm: [0.0; 6], raw: [20.0; 6] };
+        let sv = SourceValues { norm: [0.0; 6], raw: [20.0; 6], phase: [1.0; 6] };
         let frame = render_zone_config(&s, &zone, 2, 0.0, &sv, false);
         assert_eq!(frame[0], [10, 20, 30]);
         // Zones with their own colors ignore the global journey.
@@ -982,8 +1047,8 @@ mod tests {
         use crate::settings::{Settings, ZoneConfig};
         let mut s = Settings::default();
         let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
-        let cool = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 10.0, 10.0, 30.0, 60.0] };
-        let hot = SourceValues { norm: [0.9; 6], raw: [88.0, 80.0, 95.0, 95.0, 60.0, 30.0] };
+        let cool = SourceValues { norm: [0.2; 6], raw: [45.0, 35.0, 10.0, 10.0, 30.0, 60.0], phase: [1.0; 6] };
+        let hot = SourceValues { norm: [0.9; 6], raw: [88.0, 80.0, 95.0, 95.0, 60.0, 30.0], phase: [1.0; 6] };
 
         // Temperature alone (same effect) must NOT retrigger a fade —
         // idle_wants decides idle, and outside idle the key is source-free.
@@ -1019,12 +1084,14 @@ mod tests {
         let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
         // CPU at 42°C (inside range) → idle Breathing, not Solid: pick a time
         // where the breath is clearly dimmer than solid.
-        let inside = SourceValues { norm: [0.3; 6], raw: [42.0, 60.0, 0.0, 0.0, 0.0, 0.0] };
-        let outside = SourceValues { norm: [0.3; 6], raw: [70.0, 60.0, 0.0, 0.0, 0.0, 0.0] };
+        // Phase 3.2 puts Breathing near its dim trough, clearly distinct
+        // from Solid's full brightness.
+        let inside = SourceValues { norm: [0.3; 6], raw: [42.0, 60.0, 0.0, 0.0, 0.0, 0.0], phase: [3.2; 6] };
+        let outside = SourceValues { norm: [0.3; 6], raw: [70.0, 60.0, 0.0, 0.0, 0.0, 0.0], phase: [3.2; 6] };
         assert!(idle_wants(&s, &zone, &inside));
         assert!(!idle_wants(&s, &zone, &outside));
         let idle = render_zone_config(&s, &zone, 4, 4.9, &inside, true);
-        let solid = render_zone(EffectsMode::Solid, &s.colors.stops(), 4, 4.9, 0.3, s.global_brightness, EffectTuning::default());
+        let solid = render_zone(EffectsMode::Solid, &s.colors.stops(), 4, 4.9, 3.2, 0.3, s.global_brightness, EffectTuning::default());
         assert_ne!(idle, solid, "with idle active the idle effect must render");
         // Idle inactive → the normal effect, regardless of the raw value.
         let normal = render_zone_config(&s, &zone, 4, 4.9, &outside, false);

@@ -46,6 +46,8 @@ pub struct App {
     pub sim_gpu_smooth: f32,
     /// Mock value (0..100 %) for the non-temperature sources (loads/RAM/FPS).
     pub sim_other: f32,
+    /// Preview's integrated thermal clocks, mirroring the daemon's.
+    pub sim_phase: [f32; 6],
     /// Latest real sensor readings while "follow real temperatures" is on.
     pub live_readings: Option<argb_core::afterburner::Readings>,
     // custom presets
@@ -127,6 +129,7 @@ impl App {
             sim_cpu_smooth: 55.0,
             sim_gpu_smooth: 45.0,
             sim_other: 40.0,
+            sim_phase: [0.0; 6],
             live_readings: None,
             new_preset_name: String::new(),
             save_prompt_open: false,

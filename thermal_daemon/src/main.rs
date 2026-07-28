@@ -114,6 +114,11 @@ fn main() {
     let mut work = [settings.cpu_temp_min, settings.gpu_temp_min, 0.0, 0.0, 0.0, 0.0];
     let mut target = work;
     let mut fps_scale = 240.0f32;
+    // Integrated per-source thermal clocks (see engine::render_zone): they
+    // accelerate with heat but are continuous by construction, so temp
+    // spikes can never teleport an animation. Survive reconnects.
+    let mut phase = [0.0f32; 6];
+    let mut last_tick = Instant::now();
 
     let animation_start = Instant::now();
 
@@ -257,20 +262,23 @@ fn main() {
                 work[i] += (target[i] - work[i]) * settings.smoothing_speed;
             }
 
-            let sources = engine::SourceValues {
-                raw: work,
-                norm: [
-                    engine::normalize_temp(work[0], settings.cpu_temp_min, settings.cpu_temp_max),
-                    engine::normalize_temp(work[1], settings.gpu_temp_min, settings.gpu_temp_max),
-                    (work[2] / 100.0).clamp(0.0, 1.0),
-                    (work[3] / 100.0).clamp(0.0, 1.0),
-                    (work[4] / 100.0).clamp(0.0, 1.0),
-                    (work[5] / fps_scale).clamp(0.0, 1.0),
-                ],
-            };
+            let norm = [
+                engine::normalize_temp(work[0], settings.cpu_temp_min, settings.cpu_temp_max),
+                engine::normalize_temp(work[1], settings.gpu_temp_min, settings.gpu_temp_max),
+                (work[2] / 100.0).clamp(0.0, 1.0),
+                (work[3] / 100.0).clamp(0.0, 1.0),
+                (work[4] / 100.0).clamp(0.0, 1.0),
+                (work[5] / fps_scale).clamp(0.0, 1.0),
+            ];
+            let dt = last_tick.elapsed().as_secs_f32().min(0.25);
+            last_tick = Instant::now();
+            for i in 0..phase.len() {
+                phase[i] += dt * (0.5 + 1.5 * norm[i]);
+            }
+            let sources = engine::SourceValues { raw: work, norm, phase };
             let time = animation_start.elapsed().as_secs_f64();
 
-            if send_frame(&mut client, &mut map, &settings, time, &sources).is_err() {
+            if send_frame(&mut client, &mut map, &settings, time, &sources, dt).is_err() {
                 note("OpenRGB connection lost — reconnecting");
                 break 'frames;
             }
@@ -462,6 +470,7 @@ fn send_frame(
     settings: &Settings,
     time: f64,
     sources: &engine::SourceValues,
+    frame_dt: f32,
 ) -> std::io::Result<()> {
     // How long a look-change (idle kicking in, preset/effect/color switch)
     // melts into the new effect instead of hard-cutting — user-tunable.
@@ -528,6 +537,16 @@ fn send_frame(
                 for (dst, src) in frame.iter_mut().zip(&zone.fade_from) {
                     *dst = engine::blend_srgb(*src, *dst, e);
                 }
+            }
+        }
+
+        // Photosensitive-safety floor: no LED may swing faster than a full
+        // black↔white transition per ~0.35 s, whatever produced the frame.
+        // (Seizure-safe by construction, per the house rule.)
+        if zone.last_frame.len() == frame.len() {
+            let max_step = (frame_dt / 0.35).clamp(0.0, 1.0);
+            for (dst, prev) in frame.iter_mut().zip(&zone.last_frame) {
+                *dst = engine::slew_limit(*prev, *dst, max_step);
             }
         }
 

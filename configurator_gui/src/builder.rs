@@ -212,7 +212,7 @@ fn editor_card(app: &mut App, ui: &mut egui::Ui) {
         let temp = engine::normalize_temp(app.sim_cpu_smooth, s.cpu_temp_min, s.cpu_temp_max);
         let mut draft = app.effect_draft.clone();
         draft.sanitize();
-        let frame = engine::render_custom(&draft, 60, time, temp, s.global_brightness);
+        let frame = engine::render_custom(&draft, 60, time, time as f32, temp, s.global_brightness);
         strip(ui, &frame);
         ui.add_space(8.0);
 
