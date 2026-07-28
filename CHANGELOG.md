@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3 — Always Smooth, Seizure-Safe (2026-07-28)
+- **One-click installer** (`ArgbProMaster-Setup.exe`): installs the app,
+  OpenRGB and MSI Afterburner (winget), configures OpenRGB's start-with-
+  Windows scheduled task (admin + SDK server, no login UAC), daemon
+  autostart, shortcuts, uninstaller — full A-to-Z setup.
+- **Jump-free thermal clocks**: animations accelerate with heat but can
+  never teleport under temperature spikes (integrated per-sensor phase
+  replaces `time × speed(temp)`).
+- **Photosensitive-safety slew limiter**: output stage caps per-LED change
+  (full black↔white ≥ 0.35 s in linear light) — strobing is physically
+  impossible regardless of upstream behavior.
+- Apply & Save now offers to snapshot the whole setup as a named preset.
+- README rewritten as a complete install/use/help guide.
+
 ## 1.2.1 (unreleased polish)
 - **Gamma-correct color pipeline**: all gradient lookups and look-change
   crossfades now blend in linear light instead of raw sRGB — gradient

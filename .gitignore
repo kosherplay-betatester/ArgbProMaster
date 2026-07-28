@@ -1,3 +1,4 @@
 /target
 /disabled-autostart
 *.lnk
+/installer/Output
