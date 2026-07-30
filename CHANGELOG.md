@@ -17,6 +17,12 @@
   🕯 Candlelight, ⛈ Thunderstorm, ✨ Galaxy Dust, 🧬 Double Helix.
 - All of it crossfades and slew-limits exactly like before — the
   photosensitive-safety guarantees are untouched.
+- **Smarter installer**: upgrades now close a running daemon/configurator by
+  themselves (no more locked-file errors) and guarantee the daemon comes
+  back afterwards. Every checkbox tells you what's already on the machine —
+  "OpenRGB: already installed", "start-with-Windows: already set up from a
+  previous install" — and anything already in place starts unticked, so an
+  upgrade breezes through in seconds.
 
 ## 1.3 — Always Smooth, Seizure-Safe (2026-07-28)
 - **One-click installer** (`ArgbProMaster-Setup.exe`): installs the app,
