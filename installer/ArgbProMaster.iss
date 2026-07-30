@@ -32,6 +32,7 @@ SolidCompression=yes
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\configurator_gui.exe
 ; Upgrades: we close our own processes in PrepareToInstall (below), so the
 ; stock "applications are using files" page never needs to appear.

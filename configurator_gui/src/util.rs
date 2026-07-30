@@ -2,31 +2,10 @@
 
 use eframe::egui;
 
-/// Procedurally draw the app icon: an RGB spectrum ring on a dark disc.
+/// The app's flame mark, drawn by the shared procedural artist in
+/// `argb_core::icon` — pixel-identical to the .ico embedded in the exes.
 pub fn icon_rgba(size: u32) -> (Vec<u8>, u32, u32) {
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    let center = (size as f32 - 1.0) / 2.0;
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
-            let dist = (dx * dx + dy * dy).sqrt() / center;
-            let angle = dy.atan2(dx).to_degrees() + 180.0;
-            let px: [u8; 4] = if dist <= 1.0 {
-                if dist >= 0.52 {
-                    let c = argb_core::engine::hsv_to_rgb(angle, 1.0, 1.0);
-                    let edge = ((1.0 - dist) / 0.10).clamp(0.0, 1.0);
-                    [c[0] as u8, c[1] as u8, c[2] as u8, (edge * 255.0) as u8]
-                } else {
-                    [16, 18, 28, 255]
-                }
-            } else {
-                [0, 0, 0, 0]
-            };
-            rgba.extend_from_slice(&px);
-        }
-    }
-    (rgba, size, size)
+    (argb_core::icon::render(size), size, size)
 }
 
 pub fn app_icon(size: u32) -> egui::IconData {

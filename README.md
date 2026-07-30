@@ -1,3 +1,5 @@
+<img src="assets/icon.png" width="128" align="right" alt="ArgbProMaster — the thermal flame">
+
 # ArgbProMaster 🌡✨
 
 [![CI](https://github.com/kosherplay-betatester/ArgbProMaster/actions/workflows/ci.yml/badge.svg)](https://github.com/kosherplay-betatester/ArgbProMaster/actions)

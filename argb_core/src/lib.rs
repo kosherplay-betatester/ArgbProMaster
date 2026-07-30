@@ -5,6 +5,7 @@
 
 pub mod afterburner;
 pub mod engine;
+pub mod icon;
 pub mod openrgb;
 pub mod presets;
 pub mod settings;
