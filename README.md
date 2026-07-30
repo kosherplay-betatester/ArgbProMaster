@@ -68,29 +68,40 @@ fixes it in one click.
 
 ## ✨ Everything it does
 
-### Zones — any hardware, any source
+### Zones — any hardware, any source, any look
 - **Auto-detects every zone** OpenRGB exposes, including *empty* ARGB headers
   ("💤 set a LED count to bring it to life").
 - Each zone independently gets: on/off, LED count, its **component source** —
   **CPU °C, GPU °C, CPU load, GPU load, RAM use, or FPS** — its own effect,
   and its own colors. Front fans on GPU temp, underglow on CPU load, a strip
   that pulses with framerate: mix freely.
+- **🎯 Per-zone everything**: the Thermal Curves tab has a scope selector —
+  edit the whole rig at once (🌐 All zones), or pick one port/device and give
+  it its **own multi-stop Color Journey, own effect, ⤾ reverse direction,
+  own speed & intensity, and a fully independent 😴 idle setup**. One-click
+  📢 buttons bring every zone back to the global look.
 - Slow buses are respected automatically: GPU (I2C) and RAM (SMBus) zones are
   rate-limited so no configuration can ever destabilize the pipeline.
 
-### 17 effects, endlessly tunable
+### 25 effects, endlessly tunable
 Thermal Wave (lava-sea flow or classic wave), **Thermal Fill** (a 0–100%
 thermometer along the strip), **Light Trail** (a glowing pulse orbiting the
 dark strip — with Trail-length and Resolution sliders, silky smooth or
-retro-stepped), **Fireworks**, **Wave Collide**, Ember Flicker, Aurora Drift,
-Comet Chase, Meteor Shower, Larson Scanner, Plasma, Starfield Twinkle, Rain
-Drops, Gradient Pulse, Breathing (incl. Heartbeat), Spectrum Wave, Solid.
-Every effect remembers its own **Speed / Intensity / Style variant** (🎛
-Effect Tuning).
+retro-stepped), **Fireworks**, **Wave Collide**, **DNA Helix** (two
+intertwined color strands), **Lightning Storm** (soft blooming bolts),
+**Candle Flame**, **Ocean Tide** (with a sparkling foam line), **Pendulum
+Wave** (hypnotic physics), **Stardust**, **Digital Rain** (Matrix-style
+drips), **Kaleidoscope**, Ember Flicker, Aurora Drift, Comet Chase, Meteor
+Shower, Larson Scanner, Plasma, Starfield Twinkle, Rain Drops, Gradient
+Pulse, Breathing (incl. Heartbeat), Spectrum Wave, Solid. Every effect
+remembers its own **Speed / Intensity / Style variant** (🎛 Effect Tuning) —
+and any zone can additionally run it reversed, faster or softer than the
+rest of the rig.
 
 ### Color, beautifully correct
 - **Color Journey**: the classic cold→warm→hot trio, or a **custom gradient
-  with up to 8 stops** placed anywhere along the range.
+  with up to 8 stops** placed anywhere along the range — globally, per zone,
+  and even separately for the idle look.
 - **Gamma-correct pipeline**: all gradients and fades blend in linear light —
   luminous midpoints, never muddy.
 
@@ -108,8 +119,11 @@ Effect Tuning).
 
 ### 😴 Idle Effect
 Pick a range (e.g. 35–50 °C) and a calmer look — with its **own effect, own
-colors, and own speed/intensity**. The moment a zone's sensor rests inside
-the range, it settles into the idle look; heat up and it melts back.
+colors (a classic trio or a full multi-color journey), and own
+speed/intensity**. The moment a zone's sensor rests inside the range, it
+settles into the idle look; heat up and it melts back. And with the 🎯 scope
+selector, any zone can carry a **completely independent idle setup** — its
+own range and look, or no idle at all — while the rest follow the global one.
 
 ### 🧪 Effect Lab
 Build your own effects from blocks: multi-stop palette, six motion types
@@ -119,10 +133,12 @@ ignore). Live preview inside the editor; saved effects appear in every menu
 with a ★.
 
 ### Presets & daily use
-- **9 built-in presets** (Thermal Alert, Molten Ember, Aurora Borealis, Comet
-  Storm, Cyberpunk 2077, Vaporwave Sunset, Ice & Fire, Stealth Dark, Smooth
-  Spectrum Wave) + unlimited **custom presets** snapshotting your entire setup
-  — **✔ Apply & Save offers to save one every time**.
+- **15 built-in presets** (Thermal Alert, Molten Ember, Aurora Borealis,
+  Comet Storm, Cyberpunk 2077, Vaporwave Sunset, Ice & Fire, Stealth Dark,
+  Smooth Spectrum Wave, 💻 Matrix Code, 🌊 Deep Ocean, 🕯 Candlelight,
+  ⛈ Thunderstorm, ✨ Galaxy Dust, 🧬 Double Helix) + unlimited **custom
+  presets** snapshotting your entire setup — **✔ Apply & Save offers to save
+  one every time**.
 - **Live preview** with mock temperature sliders (test a 95 °C meltdown
   without heating your PC) or **📡 Follow real temperatures** for a preview in
   perfect lockstep with your LEDs.
@@ -147,7 +163,7 @@ own cause, and an unsustainable frame rate is reported in plain language.
 |---|---|
 | 🎨 **Presets & Themes** | One-click looks; save/load/delete your own. |
 | 🔌 **Zones & Ports** | Everything detected on your system. Per zone: enable, LED count, component source, effect (builtin or ★ custom), colors. "🔄 Detect zones" rescans any time. |
-| 🌡 **Thermal Curves** | Temperature windows per sensor, the Color Journey (3 colors or up to 8 stops), the global effect, 😴 Idle Effect, and 🎛 per-effect tuning. |
+| 🌡 **Thermal Curves** | Pick a 🎯 scope first: 🌐 All zones edits the temperature windows, the Color Journey (3 colors or up to 8 stops), the global effect, 😴 Idle Effect and 🎛 per-effect tuning — or select one zone and give it its own journey, effect, ⤾ direction, pace and idle setup. |
 | 🧪 **Effect Lab** | Invent, edit and manage your ★ custom effects. |
 | ⚙ **Advanced** | FPS, easing, transition time, brightness with a 70% Safety Power Lock, daemon controls, the safety-net buttons, settings folder, and 🌐 Help. |
 

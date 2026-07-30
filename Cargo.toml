@@ -3,7 +3,7 @@ resolver = "2"
 members = ["argb_core", "configurator_gui", "thermal_daemon"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.4.0"
 edition = "2021"
 
 [workspace.dependencies]

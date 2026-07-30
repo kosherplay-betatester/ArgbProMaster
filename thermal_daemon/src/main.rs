@@ -486,17 +486,19 @@ fn send_frame(
             continue; // settings shrank since resolve; remap follows shortly
         };
 
-        // Idle decision with hysteresis + dwell.
+        // Idle decision with hysteresis + dwell, against the zone's own idle
+        // setup when it has one (falls back to the global 😴 Idle Effect).
+        let idle_cfg = settings.zone_idle(cfg);
         let raw = sources.raw[cfg.target_source.index()];
         let wants = engine::idle_wants(settings, cfg, sources);
-        let beyond_margin = !settings.idle_enabled
-            || raw < settings.idle_temp_min - IDLE_EXIT_MARGIN
-            || raw > settings.idle_temp_max + IDLE_EXIT_MARGIN;
+        let beyond_margin = !idle_cfg.enabled
+            || raw < idle_cfg.temp_min - IDLE_EXIT_MARGIN
+            || raw > idle_cfg.temp_max + IDLE_EXIT_MARGIN;
         let dwell_over = zone
             .idle_changed
             .map(|t| t.elapsed() >= IDLE_DWELL)
             .unwrap_or(true);
-        if !settings.idle_enabled {
+        if !idle_cfg.enabled {
             zone.idle_state = false;
         } else if !zone.idle_state && wants && dwell_over {
             zone.idle_state = true;

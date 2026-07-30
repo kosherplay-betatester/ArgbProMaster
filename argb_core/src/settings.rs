@@ -23,10 +23,18 @@ pub enum EffectsMode {
     LightTrail,
     Fireworks,
     WaveCollide,
+    DnaHelix,
+    LightningStorm,
+    CandleFlame,
+    OceanTide,
+    PendulumWave,
+    Stardust,
+    DigitalRain,
+    Kaleidoscope,
 }
 
 impl EffectsMode {
-    pub const ALL: [EffectsMode; 17] = [
+    pub const ALL: [EffectsMode; 25] = [
         EffectsMode::ThermalWave,
         EffectsMode::ThermalFill,
         EffectsMode::GradientPulse,
@@ -44,6 +52,14 @@ impl EffectsMode {
         EffectsMode::LightTrail,
         EffectsMode::Fireworks,
         EffectsMode::WaveCollide,
+        EffectsMode::DnaHelix,
+        EffectsMode::LightningStorm,
+        EffectsMode::CandleFlame,
+        EffectsMode::OceanTide,
+        EffectsMode::PendulumWave,
+        EffectsMode::Stardust,
+        EffectsMode::DigitalRain,
+        EffectsMode::Kaleidoscope,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -65,6 +81,14 @@ impl EffectsMode {
             EffectsMode::LightTrail => "Light Trail",
             EffectsMode::Fireworks => "Fireworks",
             EffectsMode::WaveCollide => "Wave Collide",
+            EffectsMode::DnaHelix => "DNA Helix",
+            EffectsMode::LightningStorm => "Lightning Storm",
+            EffectsMode::CandleFlame => "Candle Flame",
+            EffectsMode::OceanTide => "Ocean Tide",
+            EffectsMode::PendulumWave => "Pendulum Wave",
+            EffectsMode::Stardust => "Stardust",
+            EffectsMode::DigitalRain => "Digital Rain",
+            EffectsMode::Kaleidoscope => "Kaleidoscope",
         }
     }
 
@@ -87,6 +111,14 @@ impl EffectsMode {
             EffectsMode::LightTrail => "A glowing trail orbits the dark strip in endless circles — smooth gradient tail on both sides, colored by your scheme.",
             EffectsMode::Fireworks => "Rockets shoot up the strip and burst into fading sparkles — more the hotter it gets.",
             EffectsMode::WaveCollide => "Two pulses race in from the ends and splash bright where they collide.",
+            EffectsMode::DnaHelix => "Two glowing strands twist around each other — one carries the cold end of your gradient, the other the hot.",
+            EffectsMode::LightningStorm => "A brooding sky where soft bolts bloom and slowly fade — livelier as heat builds, never harsh.",
+            EffectsMode::CandleFlame => "The warm, lazy sway of candlelight — gentle flicker around a glowing heart.",
+            EffectsMode::OceanTide => "The tide washes in and out along the strip, with a sparkling foam line at its edge.",
+            EffectsMode::PendulumWave => "A row of glowing pendulums, each swinging at its own pace — hypnotic patterns emerge and dissolve.",
+            EffectsMode::Stardust => "The whole strip shimmers like a drifting cloud of luminous dust.",
+            EffectsMode::DigitalRain => "Code-style drips fall along the strip with fading tails — straight out of the Matrix.",
+            EffectsMode::Kaleidoscope => "Your gradient folded into a rotating mirror pattern, turning endlessly around the center.",
         }
     }
 
@@ -109,6 +141,14 @@ impl EffectsMode {
             EffectsMode::LightTrail => &["Single Trail", "Twin Trails"],
             EffectsMode::Fireworks => &["Classic", "Grand Finale"],
             EffectsMode::WaveCollide => &["Center Splash", "Ping Pong"],
+            EffectsMode::DnaHelix => &["Classic", "Ribbon"],
+            EffectsMode::LightningStorm => &["Distant Storm", "Direct Hit"],
+            EffectsMode::CandleFlame => &["Single Candle", "Candelabra"],
+            EffectsMode::OceanTide => &["Calm Tide", "Storm Surge"],
+            EffectsMode::PendulumWave => &["Wave", "Chaos"],
+            EffectsMode::Stardust => &["Gentle Drift", "Glitter Storm"],
+            EffectsMode::DigitalRain => &["The Matrix", "Smooth Rain"],
+            EffectsMode::Kaleidoscope => &["Twofold", "Fourfold"],
             EffectsMode::GradientPulse | EffectsMode::Solid => &[],
         }
     }
@@ -118,6 +158,14 @@ impl EffectsMode {
     pub fn intensity_label(&self) -> &'static str {
         match self {
             EffectsMode::LightTrail => "Trail length",
+            EffectsMode::DnaHelix => "Twist density",
+            EffectsMode::LightningStorm => "Storm energy",
+            EffectsMode::CandleFlame => "Flicker depth",
+            EffectsMode::OceanTide => "Tide height",
+            EffectsMode::PendulumWave => "Pendulums",
+            EffectsMode::Stardust => "Sparkle density",
+            EffectsMode::DigitalRain => "Drop density",
+            EffectsMode::Kaleidoscope => "Segments",
             _ => "Intensity",
         }
     }
@@ -248,6 +296,75 @@ impl ColorConfig {
     /// The classic 3-color journey as gradient stops.
     pub fn stops(&self) -> Vec<(f32, [u8; 3])> {
         vec![(0.0, self.cold_color), (0.5, self.warm_color), (1.0, self.hot_color)]
+    }
+}
+
+/// A complete idle setup: the calmer look shown while a zone's source rests
+/// inside [temp_min, temp_max]. Lives in two places — the global fields on
+/// [`Settings`] (assembled via `Settings::global_idle`) and, optionally, on a
+/// single zone (`ZoneConfig::idle`), which then fully replaces the global one
+/// for that zone.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct IdleConfig {
+    pub enabled: bool,
+    pub temp_min: f32,
+    pub temp_max: f32,
+    pub effect: EffectsMode,
+    /// A ★ Effect Lab effect by name; wins over `effect`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_effect: Option<String>,
+    /// Idle's own classic 3 colors; None = the zone's normal colors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colors: Option<ColorConfig>,
+    /// Idle's own multi-stop journey (2..=8 stops); wins over `colors`.
+    /// Empty = fall through to `colors`, then the zone's normal journey.
+    pub stops: Vec<(f32, [u8; 3])>,
+    /// Idle's own speed/intensity; None = the idle effect's global tuning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<EffectTuning>,
+}
+
+impl Default for IdleConfig {
+    fn default() -> Self {
+        IdleConfig {
+            enabled: true,
+            temp_min: default_idle_min(),
+            temp_max: default_idle_max(),
+            effect: default_idle_effect(),
+            custom_effect: None,
+            colors: None,
+            stops: Vec::new(),
+            tuning: None,
+        }
+    }
+}
+
+impl IdleConfig {
+    /// Clamp ranges/stops into a renderable state (mirrors `Settings::normalize`).
+    pub fn sanitize(&mut self) {
+        self.temp_min = self.temp_min.clamp(0.0, 109.0);
+        if self.temp_max <= self.temp_min + 1.0 {
+            self.temp_max = self.temp_min + 1.0;
+        }
+        self.temp_max = self.temp_max.clamp(1.0, 110.0);
+        if let Some(t) = self.tuning {
+            self.tuning = Some(t.clamped(self.effect));
+        }
+        sanitize_stops(&mut self.stops);
+    }
+}
+
+/// Shared multi-stop journey sanitizer: ≤8 stops, positions clamped and
+/// sorted; a single stop can't form a gradient, so it collapses to "unset".
+fn sanitize_stops(stops: &mut Vec<(f32, [u8; 3])>) {
+    stops.truncate(8);
+    for stop in stops.iter_mut() {
+        stop.0 = stop.0.clamp(0.0, 1.0);
+    }
+    stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    if stops.len() == 1 {
+        stops.clear();
     }
 }
 
@@ -417,6 +534,20 @@ pub struct ZoneConfig {
     pub custom_effect: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colors_override: Option<ColorConfig>,
+    /// A full multi-stop Color Journey just for this zone (2..=8 stops);
+    /// wins over `colors_override`. None = follow the global journey.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stops_override: Option<Vec<(f32, [u8; 3])>>,
+    /// This zone's own idle setup; None = follow the global 😴 Idle Effect.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle: Option<IdleConfig>,
+    /// Mirror the animation along the strip (e.g. a comet running the
+    /// opposite way on a strip mounted upside down).
+    pub reverse: bool,
+    /// This zone's own speed & intensity. Only those two fields are used —
+    /// style variant and detail always follow the effect's global tuning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tuning_override: Option<EffectTuning>,
     /// Detection bookkeeping, refreshed on every scan so the GUI can render
     /// meaningfully even before the next detection.
     pub last_seen_leds: u32,
@@ -437,6 +568,10 @@ impl Default for ZoneConfig {
             effect_override: None,
             custom_effect: None,
             colors_override: None,
+            stops_override: None,
+            idle: None,
+            reverse: false,
+            tuning_override: None,
             last_seen_leds: 0,
             resizable: false,
             max_leds: 0,
@@ -494,6 +629,8 @@ pub struct PresetData {
     pub idle_tuning: Option<EffectTuning>,
     #[serde(default)]
     pub global_stops: Vec<(f32, [u8; 3])>,
+    #[serde(default)]
+    pub idle_stops: Vec<(f32, [u8; 3])>,
 }
 
 fn default_idle_min() -> f32 {
@@ -529,6 +666,7 @@ impl PresetData {
             idle_colors: s.idle_colors,
             idle_tuning: s.idle_tuning,
             global_stops: s.global_stops.clone(),
+            idle_stops: s.idle_stops.clone(),
         }
     }
 
@@ -553,6 +691,7 @@ impl PresetData {
         s.idle_colors = self.idle_colors;
         s.idle_tuning = self.idle_tuning;
         s.global_stops = self.global_stops.clone();
+        s.idle_stops = self.idle_stops.clone();
     }
 }
 
@@ -604,6 +743,9 @@ pub struct Settings {
     /// Multi-stop Color Journey (2..=8 stops). Empty = use the classic
     /// 3-color `colors` above. Zones with color overrides keep their own.
     pub global_stops: Vec<(f32, [u8; 3])>,
+    /// The idle look's own multi-stop journey (2..=8 stops); wins over
+    /// `idle_colors`. Empty = idle_colors, then the zone's normal journey.
+    pub idle_stops: Vec<(f32, [u8; 3])>,
     /// How long look-changes crossfade (seconds). Slow and dreamy by default.
     pub transition_secs: f32,
 }
@@ -643,6 +785,7 @@ impl Default for Settings {
             idle_colors: None,
             idle_tuning: None,
             global_stops: Vec::new(),
+            idle_stops: Vec::new(),
             transition_secs: 1.5,
         }
     }
@@ -675,15 +818,24 @@ impl Settings {
         if let Some(t) = self.idle_tuning {
             self.idle_tuning = Some(t.clamped(self.idle_effect));
         }
-        // Multi-stop journey: sorted, clamped, 2..=8 stops (or empty = off).
-        self.global_stops.truncate(8);
-        for stop in self.global_stops.iter_mut() {
-            stop.0 = stop.0.clamp(0.0, 1.0);
-        }
-        self.global_stops
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        if self.global_stops.len() == 1 {
-            self.global_stops.clear();
+        // Multi-stop journeys: sorted, clamped, 2..=8 stops (or empty = off).
+        sanitize_stops(&mut self.global_stops);
+        sanitize_stops(&mut self.idle_stops);
+        // Per-zone overrides live by the same rules.
+        for zone in self.zones.iter_mut() {
+            if let Some(stops) = &mut zone.stops_override {
+                sanitize_stops(stops);
+                if stops.len() < 2 {
+                    zone.stops_override = None;
+                }
+            }
+            if let Some(idle) = &mut zone.idle {
+                idle.sanitize();
+            }
+            if let Some(t) = zone.tuning_override {
+                let mode = zone.effect_override.unwrap_or(self.effects_mode);
+                zone.tuning_override = Some(t.clamped(mode));
+            }
         }
         // Serde default fills a missing field with 0.0; treat that as "unset".
         if self.transition_secs <= 0.0 {
@@ -699,6 +851,65 @@ impl Settings {
             self.global_stops.clone()
         } else {
             self.colors.stops()
+        }
+    }
+
+    /// The gradient THIS zone travels: its own multi-stop journey, else its
+    /// own classic 3 colors, else the global journey.
+    pub fn zone_stops(&self, zone: &ZoneConfig) -> Vec<(f32, [u8; 3])> {
+        if let Some(stops) = &zone.stops_override {
+            if stops.len() >= 2 {
+                return stops.clone();
+            }
+        }
+        match zone.colors_override {
+            Some(own) => own.stops(),
+            None => self.journey_stops(),
+        }
+    }
+
+    /// The global 😴 Idle Effect assembled from the flat legacy fields.
+    pub fn global_idle(&self) -> IdleConfig {
+        IdleConfig {
+            enabled: self.idle_enabled,
+            temp_min: self.idle_temp_min,
+            temp_max: self.idle_temp_max,
+            effect: self.idle_effect,
+            custom_effect: self.idle_custom_effect.clone(),
+            colors: self.idle_colors,
+            stops: self.idle_stops.clone(),
+            tuning: self.idle_tuning,
+        }
+    }
+
+    /// Store an edited global idle setup back into the flat legacy fields
+    /// (kept flat so existing settings.json files stay readable).
+    pub fn set_global_idle(&mut self, idle: IdleConfig) {
+        self.idle_enabled = idle.enabled;
+        self.idle_temp_min = idle.temp_min;
+        self.idle_temp_max = idle.temp_max;
+        self.idle_effect = idle.effect;
+        self.idle_custom_effect = idle.custom_effect;
+        self.idle_colors = idle.colors;
+        self.idle_stops = idle.stops;
+        self.idle_tuning = idle.tuning;
+    }
+
+    /// The idle setup governing THIS zone: its own override, else the global.
+    pub fn zone_idle(&self, zone: &ZoneConfig) -> IdleConfig {
+        zone.idle.clone().unwrap_or_else(|| self.global_idle())
+    }
+
+    /// The tuning THIS zone renders a builtin effect with: its own speed &
+    /// intensity when overridden, style variant and detail always from the
+    /// effect's global tuning (they define the effect's identity).
+    pub fn zone_tuning(&self, zone: &ZoneConfig, mode: EffectsMode) -> EffectTuning {
+        let base = self.tuning(mode);
+        match zone.tuning_override {
+            Some(own) => {
+                EffectTuning { speed: own.speed, intensity: own.intensity, ..base }.clamped(mode)
+            }
+            None => base,
         }
     }
 
@@ -982,6 +1193,78 @@ mod tests {
         s.safety_power_lock = true;
         s.normalize();
         assert!((s.global_brightness - 0.70).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn per_zone_overrides_roundtrip_and_migrate_cleanly() {
+        let mut s = Settings::default();
+        s.idle_stops = vec![(0.0, [1, 1, 1]), (1.0, [2, 2, 2])];
+        s.zones.push(ZoneConfig {
+            device_name: "Board".into(),
+            zone_name: "Header 2".into(),
+            enabled: true,
+            reverse: true,
+            stops_override: Some(vec![(0.0, [9, 9, 9]), (0.6, [5, 5, 5]), (1.0, [0, 0, 0])]),
+            tuning_override: Some(EffectTuning { speed: 2.0, intensity: 0.8, ..EffectTuning::default() }),
+            idle: Some(IdleConfig {
+                enabled: true,
+                temp_min: 30.0,
+                temp_max: 45.0,
+                effect: EffectsMode::Stardust,
+                stops: vec![(0.0, [3, 3, 3]), (1.0, [4, 4, 4])],
+                ..IdleConfig::default()
+            }),
+            ..ZoneConfig::default()
+        });
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        let back = Settings::from_json(&json).unwrap();
+        assert_eq!(s, back);
+        // Old settings files (no new fields) parse with quiet defaults.
+        let mut old = serde_json::to_value(Settings::default()).unwrap();
+        let obj = old.as_object_mut().unwrap();
+        obj.remove("idle_stops");
+        let parsed: Settings = serde_json::from_value(old).unwrap();
+        assert!(parsed.idle_stops.is_empty());
+    }
+
+    #[test]
+    fn normalize_sanitizes_per_zone_overrides() {
+        let mut s = Settings::default();
+        s.zones.push(ZoneConfig {
+            // A single stop can't form a gradient — must collapse to None.
+            stops_override: Some(vec![(0.5, [1, 2, 3])]),
+            idle: Some(IdleConfig { temp_min: 80.0, temp_max: 20.0, ..IdleConfig::default() }),
+            tuning_override: Some(EffectTuning { speed: 99.0, intensity: -3.0, ..EffectTuning::default() }),
+            ..ZoneConfig::default()
+        });
+        s.normalize();
+        let z = &s.zones[0];
+        assert!(z.stops_override.is_none());
+        let idle = z.idle.as_ref().unwrap();
+        assert!(idle.temp_max > idle.temp_min);
+        let t = z.tuning_override.unwrap();
+        assert_eq!(t.speed, 3.0);
+        assert_eq!(t.intensity, 0.0);
+    }
+
+    #[test]
+    fn global_idle_roundtrips_through_the_flat_fields() {
+        let mut s = Settings::default();
+        let idle = IdleConfig {
+            enabled: true,
+            temp_min: 25.0,
+            temp_max: 55.0,
+            effect: EffectsMode::CandleFlame,
+            colors: None,
+            stops: vec![(0.0, [1, 2, 3]), (1.0, [4, 5, 6])],
+            custom_effect: None,
+            tuning: Some(EffectTuning { speed: 0.5, intensity: 0.3, ..EffectTuning::default() }),
+        };
+        s.set_global_idle(idle.clone());
+        assert_eq!(s.global_idle(), idle);
+        // Zones without their own idle follow the global one.
+        let zone = ZoneConfig::default();
+        assert_eq!(s.zone_idle(&zone), idle);
     }
 
     #[test]

@@ -153,12 +153,10 @@ pub fn merge(zone_configs: &mut Vec<ZoneConfig>, detected: &[DetectedZone]) {
                 enabled: false,
                 led_count: 0,
                 target_source: TargetSource::Cpu,
-                effect_override: None,
-                custom_effect: None,
-                colors_override: None,
                 last_seen_leds: det.leds,
                 resizable: det.resizable,
                 max_leds: det.max_leds,
+                ..ZoneConfig::default()
             });
         }
     }

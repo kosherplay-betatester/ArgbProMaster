@@ -11,7 +11,7 @@ pub struct BuiltinPreset {
     pub swatch: [[u8; 3]; 3],
 }
 
-pub const BUILTIN_PRESETS: [BuiltinPreset; 9] = [
+pub const BUILTIN_PRESETS: [BuiltinPreset; 15] = [
     BuiltinPreset {
         name: "Thermal Alert",
         emoji: "🔥",
@@ -66,6 +66,42 @@ pub const BUILTIN_PRESETS: [BuiltinPreset; 9] = [
         tagline: "Twin comets race the strips, faster as temperatures climb.",
         swatch: [[80, 160, 255], [200, 120, 255], [255, 80, 40]],
     },
+    BuiltinPreset {
+        name: "Matrix Code",
+        emoji: "💻",
+        tagline: "Green code-rain drips down the strips, Matrix style.",
+        swatch: [[0, 60, 20], [0, 255, 70], [180, 255, 180]],
+    },
+    BuiltinPreset {
+        name: "Deep Ocean",
+        emoji: "🌊",
+        tagline: "A slow tide washes in and out with a sparkling foam line.",
+        swatch: [[0, 40, 90], [0, 140, 190], [140, 240, 255]],
+    },
+    BuiltinPreset {
+        name: "Candlelight",
+        emoji: "🕯",
+        tagline: "The warm, lazy sway of candlelight — cozy and dim.",
+        swatch: [[120, 50, 0], [255, 150, 30], [255, 220, 150]],
+    },
+    BuiltinPreset {
+        name: "Thunderstorm",
+        emoji: "⛈",
+        tagline: "A brooding sky where soft bolts bloom and slowly fade.",
+        swatch: [[20, 25, 60], [90, 110, 200], [230, 240, 255]],
+    },
+    BuiltinPreset {
+        name: "Galaxy Dust",
+        emoji: "✨",
+        tagline: "A drifting cloud of luminous dust in deep-space colors.",
+        swatch: [[60, 20, 110], [190, 60, 220], [255, 180, 240]],
+    },
+    BuiltinPreset {
+        name: "Double Helix",
+        emoji: "🧬",
+        tagline: "Two glowing strands twist around each other — bio-lab cool.",
+        swatch: [[0, 230, 180], [0, 140, 255], [180, 80, 255]],
+    },
 ];
 
 /// Every preset must fully determine the look, so the baseline also restores
@@ -78,6 +114,10 @@ fn reset_baseline(s: &mut Settings) {
     for zone in s.zones.iter_mut() {
         zone.effect_override = None;
         zone.colors_override = None;
+        zone.stops_override = None;
+        zone.tuning_override = None;
+        zone.idle = None;
+        zone.reverse = false;
     }
 }
 
@@ -180,6 +220,85 @@ pub fn apply_builtin(name: &str, s: &mut Settings) -> bool {
             s.effect_tuning.insert(
                 EffectsMode::CometChase,
                 EffectTuning { speed: 1.2, intensity: 0.6, variant: 1, ..EffectTuning::default() },
+            );
+        }
+        "Matrix Code" => {
+            reset_baseline(s);
+            s.effects_mode = EffectsMode::DigitalRain;
+            s.colors = ColorConfig {
+                cold_color: [0, 60, 20],
+                warm_color: [0, 255, 70],
+                hot_color: [180, 255, 180],
+            };
+            s.effect_tuning.insert(
+                EffectsMode::DigitalRain,
+                EffectTuning { speed: 1.0, intensity: 0.6, variant: 0, ..EffectTuning::default() },
+            );
+        }
+        "Deep Ocean" => {
+            reset_baseline(s);
+            s.effects_mode = EffectsMode::OceanTide;
+            s.colors = ColorConfig {
+                cold_color: [0, 40, 90],
+                warm_color: [0, 140, 190],
+                hot_color: [140, 240, 255],
+            };
+            s.effect_tuning.insert(
+                EffectsMode::OceanTide,
+                EffectTuning { speed: 0.8, intensity: 0.55, variant: 0, ..EffectTuning::default() },
+            );
+        }
+        "Candlelight" => {
+            reset_baseline(s);
+            s.effects_mode = EffectsMode::CandleFlame;
+            s.global_brightness = 0.45;
+            s.colors = ColorConfig {
+                cold_color: [120, 50, 0],
+                warm_color: [255, 150, 30],
+                hot_color: [255, 220, 150],
+            };
+            s.effect_tuning.insert(
+                EffectsMode::CandleFlame,
+                EffectTuning { speed: 0.8, intensity: 0.5, variant: 1, ..EffectTuning::default() },
+            );
+        }
+        "Thunderstorm" => {
+            reset_baseline(s);
+            s.effects_mode = EffectsMode::LightningStorm;
+            s.colors = ColorConfig {
+                cold_color: [20, 25, 60],
+                warm_color: [90, 110, 200],
+                hot_color: [230, 240, 255],
+            };
+            s.effect_tuning.insert(
+                EffectsMode::LightningStorm,
+                EffectTuning { speed: 1.0, intensity: 0.6, variant: 0, ..EffectTuning::default() },
+            );
+        }
+        "Galaxy Dust" => {
+            reset_baseline(s);
+            s.effects_mode = EffectsMode::Stardust;
+            s.colors = ColorConfig {
+                cold_color: [60, 20, 110],
+                warm_color: [190, 60, 220],
+                hot_color: [255, 180, 240],
+            };
+            s.effect_tuning.insert(
+                EffectsMode::Stardust,
+                EffectTuning { speed: 0.9, intensity: 0.65, variant: 0, ..EffectTuning::default() },
+            );
+        }
+        "Double Helix" => {
+            reset_baseline(s);
+            s.effects_mode = EffectsMode::DnaHelix;
+            s.colors = ColorConfig {
+                cold_color: [0, 230, 180],
+                warm_color: [0, 140, 255],
+                hot_color: [180, 80, 255],
+            };
+            s.effect_tuning.insert(
+                EffectsMode::DnaHelix,
+                EffectTuning { speed: 1.0, intensity: 0.55, variant: 0, ..EffectTuning::default() },
             );
         }
         _ => return false,

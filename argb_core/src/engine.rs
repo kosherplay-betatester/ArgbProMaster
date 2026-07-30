@@ -542,6 +542,189 @@ pub fn render_zone(
                 out.push(finish(palette_color(stops, temp), brightness * level));
             }
         }
+        EffectsMode::DnaHelix => {
+            // Two sinusoidal strands twisting around each other: one carries
+            // the cold end of the gradient, the other the hot end, so the
+            // helix reads as intertwined color ribbons.
+            let turns = 1.0 + 2.0 * k;
+            let spin = 0.9;
+            // Ribbon: soft wide strands; Classic: sharpened bright cores.
+            let sharpen = if tuning.variant == 1 { 1 } else { 3 };
+            for i in 0..led_count {
+                let x = i as f32 / n;
+                let g1 = 0.5 + 0.5 * (x * tau * turns - t * spin).sin();
+                let g2 = 0.5 + 0.5 * (x * tau * turns - t * spin + std::f32::consts::PI).sin();
+                let s1 = g1.powi(sharpen);
+                let s2 = g2.powi(sharpen);
+                // Strand 1 shows the current temperature color, strand 2 its
+                // mirror across the gradient — always a two-tone twist.
+                let (ti, level) = if s1 >= s2 {
+                    (temp, 0.06 + 0.94 * s1)
+                } else {
+                    (1.0 - temp, 0.06 + 0.94 * s2)
+                };
+                out.push(finish(palette_color(stops, ti.clamp(0.0, 1.0)), brightness * level));
+            }
+        }
+        EffectsMode::LightningStorm => {
+            // Bolts bloom somewhere along the strip and fade over ~half a
+            // cycle — dramatic but deliberately soft-edged in time (the
+            // output slew limiter additionally floors any fast swing).
+            let (rate, base) = if tuning.variant == 1 { (0.40, 0.06) } else { (0.25, 0.04) };
+            let bolts = 2 + (k * 3.0) as u32 + if tuning.variant == 1 { 1 } else { 0 };
+            for i in 0..led_count {
+                let x = i as f32 / n;
+                let mut glow: f32 = 0.0;
+                let mut hotness: f32 = 0.0;
+                for b in 0..bolts {
+                    let seed = hash01(b as f32 * 53.71);
+                    let cyc = (t * rate * (0.8 + 0.4 * seed) + seed).fract();
+                    let gen = (t * rate * (0.8 + 0.4 * seed) + seed).floor();
+                    let center = hash01(b as f32 * 31.7 + gen * 17.3);
+                    let width = 0.05 + 0.10 * hash01(b as f32 * 7.9 + gen * 11.1);
+                    // Rise-and-decay envelope across the first half cycle.
+                    let flash = if cyc < 0.5 { (1.0 - cyc / 0.5).powi(2) } else { 0.0 };
+                    let d = (x - center).abs();
+                    if d < width && flash > 0.0 {
+                        let g = flash * (1.0 - 0.6 * d / width);
+                        if g > glow {
+                            glow = g;
+                            hotness = flash;
+                        }
+                    }
+                }
+                let level = base + (1.0 - base) * glow.min(1.0);
+                // Bolts flare toward the hot end of the gradient.
+                let ti = (temp * 0.4 + hotness * 0.6).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::CandleFlame => {
+            // The lazy sway of candlelight: bright hearts with a gentle
+            // wander, far calmer than Ember Flicker.
+            let hearts: &[f32] = if tuning.variant == 1 { &[0.2, 0.5, 0.8] } else { &[0.5] };
+            let depth = 0.15 + 0.45 * k;
+            for i in 0..led_count {
+                let x = i as f32 / n;
+                let sway = 0.03 * (t * 0.7 + x * 2.0).sin();
+                let mut heart_glow: f32 = 0.0;
+                for (h_i, h) in hearts.iter().enumerate() {
+                    let wobble = h + sway + 0.02 * (t * 1.3 + h_i as f32 * 2.1).sin();
+                    let d = (x - wobble).abs();
+                    heart_glow = heart_glow.max((-(d / 0.22).powi(2)).exp());
+                }
+                let fl = flicker(i, t * 1.1);
+                let level = (heart_glow * (1.0 - depth + depth * fl)).clamp(0.03, 1.0);
+                let ti = (temp * (0.35 + 0.5 * heart_glow) + 0.1 * fl).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::OceanTide => {
+            // The tide washes in and out with a sparkling foam line riding
+            // its edge. Intensity = tide height.
+            let (amp, chop_speed) = if tuning.variant == 1 { (0.30, 2.3) } else { (0.18, 1.1) };
+            let mid = 0.30 + 0.25 * k;
+            let tide =
+                (mid + amp * (t * 0.35).sin() + 0.04 * (t * chop_speed).sin()).clamp(0.05, 0.95);
+            for i in 0..led_count {
+                let x = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
+                let lit = ((tide - x) / 0.06 + 0.5).clamp(0.0, 1.0);
+                let lit = lit * lit * (3.0 - 2.0 * lit);
+                // Foam: shimmering crest right at the tideline.
+                let foam_d = (x - tide).abs();
+                let foam = if foam_d < 0.05 {
+                    (1.0 - foam_d / 0.05) * (0.5 + 0.5 * flicker(i, t * 2.4))
+                } else {
+                    0.0
+                };
+                let level = 0.05 + 0.95 * (lit * 0.85).max(foam);
+                let ti = ((x / tide).clamp(0.0, 1.0) * temp).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::PendulumWave => {
+            // A row of pendulums with slightly different periods — patterns
+            // form, dissolve and reform, forever. Intensity = pendulum count.
+            let count = 4 + (k * 8.0) as usize;
+            let spread = if tuning.variant == 1 { 0.09 } else { 0.035 };
+            for i in 0..led_count {
+                let x = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
+                let mut glow: f32 = 0.0;
+                let mut pal = 0.0;
+                for p in 0..count {
+                    let f = 0.55 * (1.0 + p as f32 * spread);
+                    let pos = 0.5 + 0.46 * (t * f).sin();
+                    let g = (-((x - pos) / 0.035).powi(2)).exp();
+                    if g > glow {
+                        glow = g;
+                        pal = p as f32 / (count.max(2) - 1) as f32;
+                    }
+                }
+                let level = 0.05 + 0.95 * glow.min(1.0);
+                // Each pendulum wears its own slice of the gradient, shifted
+                // gently by temperature.
+                let ti = (pal * 0.7 + temp * 0.3).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::Stardust => {
+            // The whole strip shimmers like drifting luminous dust — denser
+            // and softer than Starfield Twinkle, no dark sky.
+            let (rate, floor) = if tuning.variant == 1 { (2.6, 0.15) } else { (1.0, 0.30) };
+            let density = 0.4 + 0.6 * k;
+            for i in 0..led_count {
+                let phase_off = hash01(i as f32 * 5.13) * 9.0;
+                let tw = flicker(i, t * rate + phase_off);
+                let sparkle = tw.powf(1.5) * density;
+                let level = (floor + (1.0 - floor) * sparkle).clamp(0.0, 1.0);
+                let ti = (temp + (tw - 0.5) * 0.25).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::DigitalRain => {
+            // Drips fall along the strip with fading tails. The Matrix
+            // variant quantizes the tails into blocky code-like steps.
+            let drops = 3 + (k * 5.0) as u32;
+            let rate = 0.35;
+            let quantized = tuning.variant == 0;
+            for i in 0..led_count {
+                let x = i as f32 / n;
+                let mut glow: f32 = 0.0;
+                for d in 0..drops {
+                    let seed = hash01(d as f32 * 41.23);
+                    let head = 1.0 - (t * rate * (0.7 + 0.6 * seed) + seed).fract();
+                    let tail = 0.10 + 0.15 * hash01(d as f32 * 13.7);
+                    let dist = (head - x).rem_euclid(1.0);
+                    let mut g = (-dist / tail).exp();
+                    if quantized {
+                        g = (g * 6.0).floor() / 6.0;
+                    }
+                    glow = glow.max(g);
+                }
+                let level = 0.04 + 0.96 * glow.min(1.0);
+                let ti = (temp * (0.3 + 0.7 * glow)).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
+        EffectsMode::Kaleidoscope => {
+            // The gradient folded into mirrored segments, rotating endlessly
+            // around the center of the strip.
+            let folds = if tuning.variant == 1 { 2 } else { 1 };
+            let cycles = 1.0 + 2.0 * k;
+            for i in 0..led_count {
+                let x = if led_count > 1 { i as f32 / (n - 1.0) } else { 0.0 };
+                let mut xm = (x * 2.0 - 1.0).abs();
+                if folds == 2 {
+                    xm = (xm * 2.0 - 1.0).abs();
+                }
+                // Triangular palette walk so the rotation never shows a seam.
+                let walk = (xm * cycles + t * 0.12).fract();
+                let pos = 1.0 - (walk * 2.0 - 1.0).abs();
+                let level = 0.75 + 0.25 * (xm * tau + t * 0.5).sin().abs();
+                let ti = (pos * 0.75 + temp * 0.25).clamp(0.0, 1.0);
+                out.push(finish(palette_color(stops, ti), brightness * level));
+            }
+        }
     }
     out
 }
@@ -680,92 +863,108 @@ pub struct SourceValues {
 }
 
 /// Fingerprint of everything that determines a zone's rendered LOOK (not its
-/// animation phase): resolved effect, idle state, colors, tuning, brightness.
-/// When this changes between frames, the renderer should crossfade instead of
-/// hard-cutting. Kept in sync with `render_zone_config`'s resolution logic.
+/// animation phase): resolved effect, idle state, colors, tuning, direction,
+/// brightness. When this changes between frames, the renderer should
+/// crossfade instead of hard-cutting. Kept in sync with
+/// `render_zone_config`'s resolution logic.
 pub fn style_key(settings: &Settings, zone: &ZoneConfig, idle_active: bool) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
 
+    fn hash_fx(h: &mut DefaultHasher, fx: &crate::settings::CustomEffect, speed_scale: f32) {
+        1u8.hash(h);
+        fx.name.hash(h);
+        for (pos, color) in &fx.palette {
+            pos.to_bits().hash(h);
+            color.hash(h);
+        }
+        format!("{:?}{:?}{:?}", fx.motion, fx.overlay, fx.thermal).hash(h);
+        fx.reverse.hash(h);
+        fx.speed.to_bits().hash(h);
+        fx.scale.to_bits().hash(h);
+        fx.overlay_strength.to_bits().hash(h);
+        speed_scale.to_bits().hash(h);
+    }
+    fn hash_builtin(
+        h: &mut DefaultHasher,
+        mode: crate::settings::EffectsMode,
+        stops: &[(f32, [u8; 3])],
+        tuning: crate::settings::EffectTuning,
+    ) {
+        0u8.hash(h);
+        format!("{mode:?}").hash(h);
+        for (pos, color) in stops {
+            pos.to_bits().hash(h);
+            color.hash(h);
+        }
+        tuning.speed.to_bits().hash(h);
+        tuning.intensity.to_bits().hash(h);
+        tuning.variant.hash(h);
+        tuning.detail.to_bits().hash(h);
+    }
+
     idle_active.hash(&mut h);
     settings.global_brightness.to_bits().hash(&mut h);
     zone.enabled.hash(&mut h);
+    zone.reverse.hash(&mut h);
 
-    let custom_name = if idle_active {
-        settings.idle_custom_effect.as_deref()
+    if idle_active {
+        let idle = settings.zone_idle(zone);
+        if let Some(fx) = idle.custom_effect.as_deref().and_then(|name| settings.custom_effect(name))
+        {
+            hash_fx(&mut h, fx, 1.0);
+        } else {
+            let mode = idle.effect;
+            let stops = if idle.stops.len() >= 2 {
+                idle.stops.clone()
+            } else {
+                match idle.colors {
+                    Some(own) => own.stops(),
+                    None => settings.zone_stops(zone),
+                }
+            };
+            let tuning = idle.tuning.unwrap_or_else(|| settings.tuning(mode));
+            hash_builtin(&mut h, mode, &stops, tuning);
+        }
     } else {
-        zone.custom_effect.as_deref().or(if zone.effect_override.is_none() {
+        let custom_name = zone.custom_effect.as_deref().or(if zone.effect_override.is_none() {
             settings.global_custom_effect.as_deref()
         } else {
             None
-        })
-    };
-    if let Some(fx) = custom_name.and_then(|name| settings.custom_effect(name)) {
-        1u8.hash(&mut h);
-        fx.name.hash(&mut h);
-        for (pos, color) in &fx.palette {
-            pos.to_bits().hash(&mut h);
-            color.hash(&mut h);
+        });
+        if let Some(fx) = custom_name.and_then(|name| settings.custom_effect(name)) {
+            let speed_scale =
+                zone.tuning_override.map(|t| t.speed.clamp(0.25, 3.0)).unwrap_or(1.0);
+            hash_fx(&mut h, fx, speed_scale);
+        } else {
+            let mode = zone.effect_override.unwrap_or(settings.effects_mode);
+            let stops = settings.zone_stops(zone);
+            let tuning = settings.zone_tuning(zone, mode);
+            hash_builtin(&mut h, mode, &stops, tuning);
         }
-        format!("{:?}{:?}{:?}", fx.motion, fx.overlay, fx.thermal).hash(&mut h);
-        fx.reverse.hash(&mut h);
-        fx.speed.to_bits().hash(&mut h);
-        fx.scale.to_bits().hash(&mut h);
-        fx.overlay_strength.to_bits().hash(&mut h);
-    } else {
-        let mode = if idle_active {
-            settings.idle_effect
-        } else {
-            zone.effect_override.unwrap_or(settings.effects_mode)
-        };
-        let stops = if idle_active {
-            match (settings.idle_colors, zone.colors_override) {
-                (Some(idle), _) => idle.stops(),
-                (None, Some(own)) => own.stops(),
-                (None, None) => settings.journey_stops(),
-            }
-        } else {
-            match zone.colors_override {
-                Some(own) => own.stops(),
-                None => settings.journey_stops(),
-            }
-        };
-        let tuning = if idle_active {
-            settings.idle_tuning.unwrap_or_else(|| settings.tuning(mode))
-        } else {
-            settings.tuning(mode)
-        };
-        0u8.hash(&mut h);
-        format!("{mode:?}").hash(&mut h);
-        for (pos, color) in &stops {
-            pos.to_bits().hash(&mut h);
-            color.hash(&mut h);
-        }
-        tuning.speed.to_bits().hash(&mut h);
-        tuning.intensity.to_bits().hash(&mut h);
-        tuning.variant.hash(&mut h);
-        tuning.detail.to_bits().hash(&mut h);
     }
     h.finish()
 }
 
-/// Does this zone's source currently sit inside the idle range? The raw
-/// boundary check — callers that render continuously (the daemon) should wrap
-/// it in hysteresis so a value hovering exactly on the edge doesn't make the
-/// look flip back and forth every frame.
+/// Does this zone's source currently sit inside its idle range (per-zone
+/// override or the global one)? The raw boundary check — callers that render
+/// continuously (the daemon) should wrap it in hysteresis so a value hovering
+/// exactly on the edge doesn't make the look flip back and forth every frame.
 pub fn idle_wants(settings: &Settings, zone: &ZoneConfig, sources: &SourceValues) -> bool {
-    if !settings.idle_enabled {
+    let idle = settings.zone_idle(zone);
+    if !idle.enabled {
         return false;
     }
     let raw = sources.raw[zone.target_source.index()];
-    raw >= settings.idle_temp_min && raw <= settings.idle_temp_max
+    raw >= idle.temp_min && raw <= idle.temp_max
 }
 
 /// Render a configured zone: resolves idle mode, custom vs builtin effect,
-/// per-zone colors and its chosen component source. Disabled zones render
-/// black. This is THE render entry point shared by daemon and GUI preview.
-/// `idle_active` is decided by the caller (see [`idle_wants`]).
+/// per-zone colors/journey, per-zone speed & intensity, direction, and its
+/// chosen component source. Disabled zones render black. This is THE render
+/// entry point shared by daemon and GUI preview. `idle_active` is decided by
+/// the caller (see [`idle_wants`]).
 pub fn render_zone_config(
     settings: &Settings,
     zone: &ZoneConfig,
@@ -782,43 +981,53 @@ pub fn render_zone_config(
     let ph = sources.phase[idx];
 
     // Idle mode: the calmer idle look, chosen with hysteresis by the caller.
-    // It can carry its own colors and pace, falling back to the zone's.
-    if idle_active {
-        if let Some(fx) = settings
-            .idle_custom_effect
-            .as_deref()
-            .and_then(|name| settings.custom_effect(name))
+    // Per-zone idle setups fully replace the global one; colors fall back
+    // journey → 3-color → the zone's normal gradient.
+    let mut frame = if idle_active {
+        let idle = settings.zone_idle(zone);
+        if let Some(fx) =
+            idle.custom_effect.as_deref().and_then(|name| settings.custom_effect(name))
         {
-            return render_custom(fx, led_count, time, ph, temp, settings.global_brightness);
+            render_custom(fx, led_count, time, ph, temp, settings.global_brightness)
+        } else {
+            let mode = idle.effect;
+            let stops = if idle.stops.len() >= 2 {
+                idle.stops.clone()
+            } else {
+                match idle.colors {
+                    Some(own) => own.stops(),
+                    None => settings.zone_stops(zone),
+                }
+            };
+            let tuning = idle.tuning.unwrap_or_else(|| settings.tuning(mode));
+            render_zone(mode, &stops, led_count, time, ph, temp, settings.global_brightness, tuning)
         }
-        let mode = settings.idle_effect;
-        let stops = match (settings.idle_colors, zone.colors_override) {
-            (Some(idle), _) => idle.stops(),
-            (None, Some(own)) => own.stops(),
-            (None, None) => settings.journey_stops(),
-        };
-        let tuning = settings.idle_tuning.unwrap_or_else(|| settings.tuning(mode));
-        return render_zone(mode, &stops, led_count, time, ph, temp, settings.global_brightness, tuning);
-    }
-
-    // Custom effect resolution: zone-level name, else the global custom
-    // effect (only when the zone has no builtin override), else builtins.
-    let custom_name = zone.custom_effect.as_deref().or(if zone.effect_override.is_none() {
-        settings.global_custom_effect.as_deref()
     } else {
-        None
-    });
-    if let Some(fx) = custom_name.and_then(|name| settings.custom_effect(name)) {
-        return render_custom(fx, led_count, time, ph, temp, settings.global_brightness);
-    }
-
-    let mode = zone.effect_override.unwrap_or(settings.effects_mode);
-    let stops = match zone.colors_override {
-        Some(own) => own.stops(),
-        None => settings.journey_stops(),
+        // Custom effect resolution: zone-level name, else the global custom
+        // effect (only when the zone has no builtin override), else builtins.
+        let custom_name = zone.custom_effect.as_deref().or(if zone.effect_override.is_none() {
+            settings.global_custom_effect.as_deref()
+        } else {
+            None
+        });
+        if let Some(fx) = custom_name.and_then(|name| settings.custom_effect(name)) {
+            // Per-zone speed applies to custom effects by scaling their
+            // clocks — a constant factor keeps the phase continuous, so the
+            // jump-free guarantee holds.
+            let sp = zone.tuning_override.map(|t| t.speed.clamp(0.25, 3.0)).unwrap_or(1.0);
+            render_custom(fx, led_count, time * sp as f64, ph * sp, temp, settings.global_brightness)
+        } else {
+            let mode = zone.effect_override.unwrap_or(settings.effects_mode);
+            let stops = settings.zone_stops(zone);
+            let tuning = settings.zone_tuning(zone, mode);
+            render_zone(mode, &stops, led_count, time, ph, temp, settings.global_brightness, tuning)
+        }
     };
-    let tuning = settings.tuning(mode);
-    render_zone(mode, &stops, led_count, time, ph, temp, settings.global_brightness, tuning)
+    // Reverse direction: mirror the finished frame along the strip.
+    if zone.reverse {
+        frame.reverse();
+    }
+    frame
 }
 
 #[cfg(test)]
@@ -886,6 +1095,14 @@ mod tests {
             EffectsMode::LightTrail,
             EffectsMode::Fireworks,
             EffectsMode::WaveCollide,
+            EffectsMode::DnaHelix,
+            EffectsMode::LightningStorm,
+            EffectsMode::CandleFlame,
+            EffectsMode::OceanTide,
+            EffectsMode::PendulumWave,
+            EffectsMode::Stardust,
+            EffectsMode::DigitalRain,
+            EffectsMode::Kaleidoscope,
         ] {
             // Non-round phase so speed multipliers can't alias onto the same
             // fractional cycle position.
@@ -1106,5 +1323,132 @@ mod tests {
         assert_eq!(hsv_to_rgb(0.0, 1.0, 1.0), [255.0, 0.0, 0.0]);
         assert_eq!(hsv_to_rgb(120.0, 1.0, 1.0), [0.0, 255.0, 0.0]);
         assert_eq!(hsv_to_rgb(240.0, 1.0, 1.0), [0.0, 0.0, 255.0]);
+    }
+
+    #[test]
+    fn zone_reverse_mirrors_the_frame() {
+        use crate::settings::{Settings, ZoneConfig};
+        let mut s = Settings::default();
+        s.effects_mode = EffectsMode::ThermalFill; // spatially asymmetric
+        let sv = SourceValues { norm: [0.5; 6], raw: [60.0; 6], phase: [2.3; 6] };
+        let fwd = ZoneConfig { enabled: true, ..ZoneConfig::default() };
+        let rev = ZoneConfig { enabled: true, reverse: true, ..ZoneConfig::default() };
+        let a = render_zone_config(&s, &fwd, 16, 1.0, &sv, false);
+        let mut b = render_zone_config(&s, &rev, 16, 1.0, &sv, false);
+        b.reverse();
+        assert_eq!(a, b, "reverse must be an exact mirror");
+        // And the look fingerprint knows about direction.
+        assert_ne!(style_key(&s, &fwd, false), style_key(&s, &rev, false));
+    }
+
+    #[test]
+    fn zone_tuning_override_changes_pace_but_not_style() {
+        use crate::settings::{EffectTuning, Settings, ZoneConfig};
+        let mut s = Settings::default();
+        s.effect_tuning.insert(
+            EffectsMode::ThermalWave,
+            EffectTuning { variant: 1, detail: 0.4, ..EffectTuning::default() },
+        );
+        let plain = ZoneConfig { enabled: true, ..ZoneConfig::default() };
+        let tuned = ZoneConfig {
+            enabled: true,
+            tuning_override: Some(EffectTuning { speed: 3.0, intensity: 0.9, variant: 0, detail: 1.0 }),
+            ..ZoneConfig::default()
+        };
+        // Speed & intensity come from the override…
+        let t = s.zone_tuning(&tuned, EffectsMode::ThermalWave);
+        assert_eq!(t.speed, 3.0);
+        assert_eq!(t.intensity, 0.9);
+        // …style variant and detail stay with the effect's global tuning.
+        assert_eq!(t.variant, 1);
+        assert_eq!(t.detail, 0.4);
+        let sv = SourceValues { norm: [0.5; 6], raw: [60.0; 6], phase: [2.3; 6] };
+        assert_ne!(
+            render_zone_config(&s, &plain, 24, 1.0, &sv, false),
+            render_zone_config(&s, &tuned, 24, 1.0, &sv, false),
+        );
+        assert_ne!(style_key(&s, &plain, false), style_key(&s, &tuned, false));
+    }
+
+    #[test]
+    fn per_zone_stops_override_wins_over_everything() {
+        use crate::settings::{ColorConfig, Settings, ZoneConfig};
+        let mut s = Settings::default();
+        s.effects_mode = EffectsMode::Solid;
+        s.global_brightness = 1.0;
+        s.safety_power_lock = false;
+        let zone = ZoneConfig {
+            enabled: true,
+            colors_override: Some(ColorConfig::default()),
+            stops_override: Some(vec![(0.0, [7, 8, 9]), (1.0, [7, 8, 9])]),
+            ..ZoneConfig::default()
+        };
+        let sv = SourceValues { norm: [0.0; 6], raw: [20.0; 6], phase: [1.0; 6] };
+        let frame = render_zone_config(&s, &zone, 2, 0.0, &sv, false);
+        assert_eq!(frame[0], [7, 8, 9], "the per-zone journey beats the 3-color override");
+        assert_ne!(
+            style_key(&s, &zone, false),
+            style_key(&s, &ZoneConfig { enabled: true, ..ZoneConfig::default() }, false)
+        );
+    }
+
+    #[test]
+    fn per_zone_idle_overrides_the_global_setup() {
+        use crate::settings::{IdleConfig, Settings, ZoneConfig};
+        let mut s = Settings::default();
+        s.idle_enabled = false; // global idle OFF…
+        let follower = ZoneConfig { enabled: true, ..ZoneConfig::default() };
+        let own = ZoneConfig {
+            enabled: true,
+            idle: Some(IdleConfig { enabled: true, temp_min: 30.0, temp_max: 50.0, ..IdleConfig::default() }),
+            ..ZoneConfig::default()
+        };
+        let resting = SourceValues { norm: [0.2; 6], raw: [40.0; 6], phase: [1.0; 6] };
+        // …yet the zone with its own idle setup rests, the follower doesn't.
+        assert!(!idle_wants(&s, &follower, &resting));
+        assert!(idle_wants(&s, &own, &resting));
+        // A per-zone idle setup can also OPT OUT while global idle is on.
+        s.idle_enabled = true;
+        s.idle_temp_min = 30.0;
+        s.idle_temp_max = 50.0;
+        let opt_out = ZoneConfig {
+            enabled: true,
+            idle: Some(IdleConfig { enabled: false, ..IdleConfig::default() }),
+            ..ZoneConfig::default()
+        };
+        assert!(idle_wants(&s, &follower, &resting));
+        assert!(!idle_wants(&s, &opt_out, &resting));
+    }
+
+    #[test]
+    fn idle_multi_stop_journey_flows_into_rendering() {
+        use crate::settings::{IdleConfig, Settings, ZoneConfig};
+        let mut s = Settings::default();
+        s.effects_mode = EffectsMode::Solid;
+        s.global_brightness = 1.0;
+        s.safety_power_lock = false;
+        // Global idle with its own journey: Solid idling at cold shows the
+        // journey's first stop, not the normal gradient's.
+        s.idle_enabled = true;
+        s.idle_effect = EffectsMode::Solid;
+        s.idle_stops = vec![(0.0, [11, 22, 33]), (1.0, [44, 55, 66])];
+        let zone = ZoneConfig { enabled: true, ..ZoneConfig::default() };
+        let sv = SourceValues { norm: [0.0; 6], raw: [40.0; 6], phase: [1.0; 6] };
+        let frame = render_zone_config(&s, &zone, 2, 0.0, &sv, true);
+        assert_eq!(frame[0], [11, 22, 33]);
+        // Per-zone idle journey wins over the global idle journey.
+        let own = ZoneConfig {
+            enabled: true,
+            idle: Some(IdleConfig {
+                enabled: true,
+                effect: EffectsMode::Solid,
+                stops: vec![(0.0, [99, 88, 77]), (1.0, [1, 2, 3])],
+                ..IdleConfig::default()
+            }),
+            ..ZoneConfig::default()
+        };
+        let own_frame = render_zone_config(&s, &own, 2, 0.0, &sv, true);
+        assert_eq!(own_frame[0], [99, 88, 77]);
+        assert_ne!(style_key(&s, &zone, true), style_key(&s, &own, true));
     }
 }

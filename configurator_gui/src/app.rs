@@ -52,6 +52,9 @@ pub struct App {
     pub live_readings: Option<argb_core::afterburner::Readings>,
     // custom presets
     pub new_preset_name: String,
+    /// Thermal Curves scope: None = 🌐 all zones (global), Some(i) = edit
+    /// zone i's own journey / effect / motion / idle setup.
+    pub curves_zone: Option<usize>,
     // Apply & Save confirmation dialog
     save_prompt_open: bool,
     save_prompt_name: String,
@@ -132,6 +135,7 @@ impl App {
             sim_phase: [0.0; 6],
             live_readings: None,
             new_preset_name: String::new(),
+            curves_zone: None,
             save_prompt_open: false,
             save_prompt_name: String::new(),
             effect_draft: CustomEffect::default(),
@@ -291,6 +295,10 @@ impl App {
             zone.effect_override = None;
             zone.custom_effect = None;
             zone.colors_override = None;
+            zone.stops_override = None;
+            zone.tuning_override = None;
+            zone.idle = None;
+            zone.reverse = false;
             // Known-good means: motherboard ARGB zones (fast HID bus) with
             // real detected LEDs. GPU (I2C) and RAM (SMBus) zones live on
             // slow buses that can choke the whole pipeline into reconnect

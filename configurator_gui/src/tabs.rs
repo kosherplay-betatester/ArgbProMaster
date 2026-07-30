@@ -370,6 +370,16 @@ fn zone_row(
             ui.end_row();
         });
     colors_override_editor(ui, &mut zone.colors_override, global_colors, &salt);
+    if zone.stops_override.is_some() {
+        ui.label(
+            RichText::new(
+                "🌈 This zone has its own multi-color journey (🌡 Thermal Curves → 🎯 scope) — \
+                 it wins over the colors above.",
+            )
+            .small()
+            .color(theme::TEXT_DIM),
+        );
+    }
 }
 
 /// Paint a multi-stop gradient as a horizontal bar (sorted copy).
@@ -475,11 +485,105 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
     theme::section_title(
         ui,
         "🌡 Thermal Response Curves",
-        "Choose the temperature window each sensor sweeps across, and the colors the lights travel through.",
+        "Temperature windows, color journeys, effects, motion and idle looks — \
+         for the whole rig at once, or one port/device at a time.",
     );
     // Sliders scale with the window instead of overflowing it.
     ui.spacing_mut().slider_width = (ui.available_width() * 0.4).clamp(140.0, 240.0);
 
+    // The zone list can shrink between frames (detection, resets).
+    if let Some(i) = app.curves_zone {
+        if i >= app.settings.zones.len() {
+            app.curves_zone = None;
+        }
+    }
+    scope_card(app, ui);
+    ui.add_space(8.0);
+
+    match app.curves_zone {
+        None => {
+            global_ranges_cards(app, ui);
+            ui.add_space(8.0);
+            global_journey_card(app, ui);
+            ui.add_space(8.0);
+            global_idle_card(app, ui);
+            ui.add_space(8.0);
+            effect_tuning_card(app, ui);
+        }
+        Some(i) => {
+            zone_journey_card(app, ui, i);
+            ui.add_space(8.0);
+            zone_motion_card(app, ui, i);
+            ui.add_space(8.0);
+            zone_idle_card(app, ui, i);
+        }
+    }
+}
+
+/// A short human name for a zone in the 🎯 scope picker.
+fn zone_scope_label(zone: &ZoneConfig) -> String {
+    let name = if !zone.display_name.is_empty() {
+        zone.display_name.as_str()
+    } else if !zone.zone_name.is_empty() {
+        zone.zone_name.as_str()
+    } else {
+        zone.device_name.as_str()
+    };
+    format!("{} {}", device_emoji(zone.device_type), name)
+}
+
+/// 🎯 Scope: everything below edits either the whole rig or one zone.
+fn scope_card(app: &mut App, ui: &mut egui::Ui) {
+    theme::card_frame().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("🎯 Editing").strong());
+            let selected = match app.curves_zone {
+                None => "🌐 All zones (global)".to_string(),
+                Some(i) => zone_scope_label(&app.settings.zones[i]),
+            };
+            egui::ComboBox::from_id_salt("curves_scope")
+                .selected_text(selected)
+                .width((ui.available_width() * 0.6).clamp(200.0, 340.0))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(app.curves_zone.is_none(), "🌐 All zones (global)")
+                        .on_hover_text("Edit the shared settings every zone follows by default.")
+                        .clicked()
+                    {
+                        app.curves_zone = None;
+                    }
+                    for i in 0..app.settings.zones.len() {
+                        let (mut label, device) = {
+                            let z = &app.settings.zones[i];
+                            (zone_scope_label(z), z.device_name.clone())
+                        };
+                        if !app.settings.zones[i].enabled {
+                            label.push_str("  (off)");
+                        }
+                        if ui
+                            .selectable_label(app.curves_zone == Some(i), label)
+                            .on_hover_text(device)
+                            .clicked()
+                        {
+                            app.curves_zone = Some(i);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Everything below edits this scope: the global look every zone follows — or \
+                     one port/device with its own journey, effect, direction, pace and idle setup.",
+                );
+        });
+        let hint = match app.curves_zone {
+            None => "Global scope: these settings drive every zone that hasn't been given its own setup.",
+            Some(_) => "Zone scope: give just this port/device its own journey, effect, direction, pace and idle look. Anything you don't override keeps following the global settings.",
+        };
+        ui.label(RichText::new(hint).small().color(theme::TEXT_DIM));
+    });
+}
+
+fn global_ranges_cards(app: &mut App, ui: &mut egui::Ui) {
     let s = &mut app.settings;
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("CPU Response Range").strong());
@@ -512,8 +616,42 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
             s.gpu_temp_max = s.gpu_temp_min + 1.0;
         }
     });
+}
 
-    ui.add_space(8.0);
+/// Reusable multi-stop gradient editor (2..=8 stops) with live bar.
+fn journey_stops_editor(ui: &mut egui::Ui, stops: &mut Vec<(f32, [u8; 3])>) {
+    let mut remove: Option<usize> = None;
+    let count = stops.len();
+    for (i, stop) in stops.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.color_edit_button_srgb(&mut stop.1)
+                .on_hover_text("The color at this point of the journey.");
+            let mut pct = stop.0 * 100.0;
+            if ui
+                .add(egui::Slider::new(&mut pct, 0.0..=100.0).custom_formatter(|v, _| format!("{v:.0}%")))
+                .on_hover_text("Where along the cold→hot journey this color sits.")
+                .changed()
+            {
+                stop.0 = pct / 100.0;
+            }
+            if count > 2 && ui.button("✖").on_hover_text("Remove this color stop.").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        stops.remove(i);
+    }
+    if stops.len() < 8 && ui.button("＋ Add color stop").clicked() {
+        let last = stops.last().copied().unwrap_or((0.5, [255, 255, 255]));
+        stops.push(((last.0 + 1.0) / 2.0, last.1));
+    }
+    ui.add_space(4.0);
+    stops_bar(ui, stops);
+}
+
+fn global_journey_card(app: &mut App, ui: &mut egui::Ui) {
+    let s = &mut app.settings;
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("Color Journey").strong());
         ui.label(
@@ -533,34 +671,7 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
         }
 
         if multi {
-            let mut remove: Option<usize> = None;
-            let count = s.global_stops.len();
-            for (i, stop) in s.global_stops.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.color_edit_button_srgb(&mut stop.1)
-                        .on_hover_text("The color at this point of the journey.");
-                    let mut pct = stop.0 * 100.0;
-                    if ui
-                        .add(egui::Slider::new(&mut pct, 0.0..=100.0).custom_formatter(|v, _| format!("{v:.0}%")))
-                        .on_hover_text("Where along the cold→hot journey this color sits.")
-                        .changed()
-                    {
-                        stop.0 = pct / 100.0;
-                    }
-                    if count > 2 && ui.button("✖").on_hover_text("Remove this color stop.").clicked() {
-                        remove = Some(i);
-                    }
-                });
-            }
-            if let Some(i) = remove {
-                s.global_stops.remove(i);
-            }
-            if s.global_stops.len() < 8 && ui.button("＋ Add color stop").clicked() {
-                let last = s.global_stops.last().copied().unwrap_or((0.5, [255, 255, 255]));
-                s.global_stops.push(((last.0 + 1.0) / 2.0, last.1));
-            }
-            ui.add_space(4.0);
-            stops_bar(ui, &s.global_stops);
+            journey_stops_editor(ui, &mut s.global_stops);
         } else {
             ui.horizontal(|ui| {
                 ui.label("Cold");
@@ -577,6 +688,25 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
             });
             ui.add_space(6.0);
             theme::gradient_bar(ui, &s.colors, 18.0);
+        }
+
+        let own_colors = s
+            .zones
+            .iter()
+            .filter(|z| z.stops_override.is_some() || z.colors_override.is_some())
+            .count();
+        if own_colors > 0 {
+            ui.add_space(6.0);
+            if ui
+                .button(format!("📢 Make every zone follow this journey ({own_colors} have their own colors)"))
+                .on_hover_text("Clears every zone's own colors and own journey so the whole rig travels this one gradient.")
+                .clicked()
+            {
+                for z in s.zones.iter_mut() {
+                    z.stops_override = None;
+                    z.colors_override = None;
+                }
+            }
         }
         ui.add_space(8.0);
 
@@ -617,97 +747,314 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
         };
         ui.label(RichText::new(describe).small().color(theme::TEXT_DIM));
     });
-
-    ui.add_space(8.0);
-    idle_effect_card(app, ui);
-    ui.add_space(8.0);
-    effect_tuning_card(app, ui);
 }
 
-/// 😴 Idle Effect: a calmer look that kicks in while temps rest in a range.
-fn idle_effect_card(app: &mut App, ui: &mut egui::Ui) {
-    let s = &mut app.settings;
+/// Zone scope: this zone's own Color Journey (or the global one).
+fn zone_journey_card(app: &mut App, ui: &mut egui::Ui, i: usize) {
+    let seed = app.settings.zone_stops(&app.settings.zones[i]);
+    let label = zone_scope_label(&app.settings.zones[i]);
+    let zone = &mut app.settings.zones[i];
+    theme::card_frame().show(ui, |ui| {
+        ui.label(RichText::new(format!("Color Journey · {label}")).strong());
+        ui.label(
+            RichText::new("The gradient just this zone travels — up to 8 stops, independent of the rest of the rig.")
+                .small()
+                .color(theme::TEXT_DIM),
+        );
+        ui.add_space(4.0);
+        let mut own = zone.stops_override.is_some();
+        if ui
+            .checkbox(&mut own, "🌈 Own color journey for this zone")
+            .on_hover_text("Give this zone its own gradient instead of the global journey. Starts from what it shows right now.")
+            .changed()
+        {
+            zone.stops_override = if own { Some(seed.clone()) } else { None };
+        }
+        match &mut zone.stops_override {
+            Some(stops) => journey_stops_editor(ui, stops),
+            None => {
+                if zone.colors_override.is_some() {
+                    ui.label(
+                        RichText::new("Using its own 3 colors from Zones & Ports. Tick the box above for a full multi-stop journey (it wins over those).")
+                            .small()
+                            .color(theme::TEXT_DIM),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("Following the global journey:")
+                            .small()
+                            .color(theme::TEXT_DIM),
+                    );
+                }
+                ui.add_space(4.0);
+                stops_bar(ui, &seed);
+            }
+        }
+    });
+}
+
+/// Zone scope: effect, direction and pace for one zone.
+fn zone_motion_card(app: &mut App, ui: &mut egui::Ui, i: usize) {
+    let custom_names: Vec<String> =
+        app.settings.custom_effects.iter().map(|f| f.name.clone()).collect();
+    let label = zone_scope_label(&app.settings.zones[i]);
+    let mode = app.settings.zones[i]
+        .effect_override
+        .unwrap_or(app.settings.effects_mode);
+    let tuning_seed = app.settings.tuning(mode);
+    let zone = &mut app.settings.zones[i];
+    theme::card_frame().show(ui, |ui| {
+        ui.label(RichText::new(format!("🎛 Effect & Motion · {label}")).strong());
+        ui.label(
+            RichText::new("This zone's own effect, direction and pace. Style variants stay with the effect's global tuning.")
+                .small()
+                .color(theme::TEXT_DIM),
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Effect");
+            zone_effect_combo(ui, zone, &custom_names, &format!("curves_zone{i}"));
+        });
+        ui.add_space(4.0);
+        ui.checkbox(&mut zone.reverse, "⤾ Reverse direction")
+            .on_hover_text("Mirror the animation along the strip — comets, trails, fills and rain run the other way. Great for strips mounted upside down.");
+        let mut own_pace = zone.tuning_override.is_some();
+        if ui
+            .checkbox(&mut own_pace, "Own speed && intensity for this zone")
+            .on_hover_text("Let this zone run faster/slower or softer/stronger than the same effect elsewhere.")
+            .changed()
+        {
+            zone.tuning_override = if own_pace { Some(tuning_seed) } else { None };
+        }
+        if let Some(tuning) = &mut zone.tuning_override {
+            ui.add(
+                egui::Slider::new(&mut tuning.speed, 0.25..=3.0)
+                    .custom_formatter(|v, _| format!("{v:.2}×"))
+                    .text("Speed"),
+            )
+            .on_hover_text("Animation speed for this zone only. 1.00× = the effect's global pace.");
+            ui.add(
+                egui::Slider::new(&mut tuning.intensity, 0.0..=1.0)
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .text("Intensity"),
+            )
+            .on_hover_text("How pronounced the motion is for this zone only. 50% = the stock look.");
+        }
+    });
+}
+
+/// Zone scope: this zone's own idle setup (or the global one).
+fn zone_idle_card(app: &mut App, ui: &mut egui::Ui, i: usize) {
+    let global_idle = app.settings.global_idle();
+    let custom_names: Vec<String> =
+        app.settings.custom_effects.iter().map(|f| f.name.clone()).collect();
+    let tuning_map = app.settings.effect_tuning.clone();
+    let seed_colors = app.settings.colors;
+    let seed_stops = app.settings.zone_stops(&app.settings.zones[i]);
+    let label = zone_scope_label(&app.settings.zones[i]);
+    let zone = &mut app.settings.zones[i];
+    theme::card_frame().show(ui, |ui| {
+        ui.label(RichText::new(format!("😴 Idle Effect · {label}")).strong());
+        ui.label(
+            RichText::new(
+                "This zone's own resting look — its own range, effect, colors and pace, \
+                 fully independent of the global idle setup.",
+            )
+            .small()
+            .color(theme::TEXT_DIM),
+        );
+        ui.add_space(4.0);
+        let mut own = zone.idle.is_some();
+        if ui
+            .checkbox(&mut own, "Own idle setup for this zone")
+            .on_hover_text("Starts as a copy of the global idle setup — then shape it freely for just this zone.")
+            .changed()
+        {
+            zone.idle = if own { Some(global_idle.clone()) } else { None };
+        }
+        match &mut zone.idle {
+            Some(idle) => {
+                ui.checkbox(&mut idle.enabled, "Idle enabled for this zone")
+                    .on_hover_text("Untick to keep this zone always on its normal effect, even when the rest of the rig rests.");
+                if idle.enabled {
+                    ui.add_space(4.0);
+                    idle_config_editor(ui, idle, &custom_names, seed_colors, &seed_stops, &tuning_map, &format!("zone{i}"));
+                }
+            }
+            None => {
+                ui.label(
+                    RichText::new("Following the global idle setup (🌐 All zones scope).")
+                        .small()
+                        .color(theme::TEXT_DIM),
+                );
+            }
+        }
+    });
+}
+
+/// 😴 Global Idle Effect: a calmer look that kicks in while temps rest in a
+/// range — for every zone without its own idle setup.
+fn global_idle_card(app: &mut App, ui: &mut egui::Ui) {
+    let custom_names: Vec<String> =
+        app.settings.custom_effects.iter().map(|f| f.name.clone()).collect();
+    let tuning_map = app.settings.effect_tuning.clone();
+    let seed_colors = app.settings.colors;
+    let seed_stops = app.settings.journey_stops();
+    let own_idle_zones = app.settings.zones.iter().filter(|z| z.idle.is_some()).count();
+    let mut idle = app.settings.global_idle();
+    let mut clear_zone_idles = false;
     theme::card_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new("😴 Idle Effect").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.checkbox(&mut s.idle_enabled, "Enabled")
-                    .on_hover_text("When a zone's temperature sits inside the range below, show the idle effect instead of its normal one — e.g. calm Stealth-style breathing while the PC is chilling.");
+                ui.checkbox(&mut idle.enabled, "Enabled")
+                    .on_hover_text("When a zone's source sits inside the range below, show the idle effect instead of its normal one — e.g. calm Stealth-style breathing while the PC is chilling.");
             });
         });
         ui.label(
             RichText::new(
                 "Once a zone's source settles into this range, the idle look kicks in; the \
                  moment it leaves, the normal effect returns. The range is in the source's own \
-                 units — °C for temperatures, % for loads.",
+                 units — °C for temperatures, % for loads. Zones given their own idle setup \
+                 (🎯 scope above) ignore this one.",
             )
             .small()
             .color(theme::TEXT_DIM),
         );
-        if !s.idle_enabled {
-            return;
+        if idle.enabled {
+            ui.add_space(4.0);
+            idle_config_editor(ui, &mut idle, &custom_names, seed_colors, &seed_stops, &tuning_map, "global");
         }
-        ui.add_space(4.0);
-        ui.add(
-            egui::Slider::new(&mut s.idle_temp_min, 0.0..=100.0)
-                .text("From")
-                .suffix(" °C"),
-        )
-        .on_hover_text("The bottom of the idle range.");
-        ui.add(
-            egui::Slider::new(&mut s.idle_temp_max, 5.0..=110.0)
-                .text("To")
-                .suffix(" °C"),
-        )
+        if own_idle_zones > 0 {
+            ui.add_space(6.0);
+            if ui
+                .button(format!("📢 Make every zone follow this idle setup ({own_idle_zones} have their own)"))
+                .on_hover_text("Clears each zone's own idle setup so the whole rig rests the same way.")
+                .clicked()
+            {
+                clear_zone_idles = true;
+            }
+        }
+    });
+    app.settings.set_global_idle(idle);
+    if clear_zone_idles {
+        for z in app.settings.zones.iter_mut() {
+            z.idle = None;
+        }
+    }
+}
+
+/// The shared idle setup editor — the global card and per-zone overrides are
+/// the exact same controls operating on an [`IdleConfig`].
+fn idle_config_editor(
+    ui: &mut egui::Ui,
+    idle: &mut argb_core::settings::IdleConfig,
+    custom_names: &[String],
+    seed_colors: ColorConfig,
+    seed_stops: &[(f32, [u8; 3])],
+    tuning_map: &std::collections::BTreeMap<EffectsMode, argb_core::settings::EffectTuning>,
+    salt: &str,
+) {
+    ui.add(egui::Slider::new(&mut idle.temp_min, 0.0..=100.0).text("From").suffix(" °C"))
+        .on_hover_text("The bottom of the idle range (°C for temperatures, % for loads/RAM, frames for FPS).");
+    ui.add(egui::Slider::new(&mut idle.temp_max, 5.0..=110.0).text("To").suffix(" °C"))
         .on_hover_text("The top of the idle range. Tip: GPUs idle cooler than CPUs — start from 0 °C if you want GPU zones to idle too.");
-        if s.idle_temp_max <= s.idle_temp_min + 1.0 {
-            s.idle_temp_max = s.idle_temp_min + 1.0;
-        }
+    if idle.temp_max <= idle.temp_min + 1.0 {
+        idle.temp_max = idle.temp_min + 1.0;
+    }
 
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Idle look");
-            let selected = if let Some(name) = &s.idle_custom_effect {
-                format!("★ {name}")
-            } else {
-                s.idle_effect.label().to_string()
-            };
-            let custom_names: Vec<String> = s.custom_effects.iter().map(|f| f.name.clone()).collect();
-            egui::ComboBox::from_id_salt("idle_effect")
-                .selected_text(selected)
-                .show_ui(ui, |ui| {
-                    for mode in EffectsMode::ALL {
-                        let is = s.idle_custom_effect.is_none() && s.idle_effect == mode;
-                        if ui
-                            .selectable_label(is, mode.label())
-                            .on_hover_text(mode.describe())
-                            .clicked()
-                        {
-                            s.idle_effect = mode;
-                            s.idle_custom_effect = None;
-                        }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Idle look");
+        let selected = if let Some(name) = &idle.custom_effect {
+            format!("★ {name}")
+        } else {
+            idle.effect.label().to_string()
+        };
+        egui::ComboBox::from_id_salt(format!("idle_fx_{salt}"))
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for mode in EffectsMode::ALL {
+                    let is = idle.custom_effect.is_none() && idle.effect == mode;
+                    if ui
+                        .selectable_label(is, mode.label())
+                        .on_hover_text(mode.describe())
+                        .clicked()
+                    {
+                        idle.effect = mode;
+                        idle.custom_effect = None;
                     }
-                    for name in &custom_names {
-                        let is = s.idle_custom_effect.as_deref() == Some(name.as_str());
-                        if ui.selectable_label(is, format!("★ {name}")).clicked() {
-                            s.idle_custom_effect = Some(name.clone());
-                        }
+                }
+                for name in custom_names {
+                    let is = idle.custom_effect.as_deref() == Some(name.as_str());
+                    if ui.selectable_label(is, format!("★ {name}")).clicked() {
+                        idle.custom_effect = Some(name.clone());
                     }
-                })
-                .response
-                .on_hover_text("Any builtin effect or one of your ★ Effect Lab creations.");
-        });
+                }
+            })
+            .response
+            .on_hover_text("Any builtin effect or one of your ★ Effect Lab creations.");
+    });
 
-        ui.add_space(4.0);
-        let mut own_colors = s.idle_colors.is_some();
-        if ui
-            .checkbox(&mut own_colors, "Custom colors for the idle look")
-            .on_hover_text("Give idle its own cold/warm/hot colors — e.g. dim blues while resting, without touching your main gradient.")
-            .changed()
-        {
-            s.idle_colors = if own_colors { Some(s.colors) } else { None };
+    // Idle colors: follow the zone's gradient, an own classic trio, or an
+    // own full multi-stop journey.
+    ui.add_space(4.0);
+    #[derive(PartialEq, Clone, Copy)]
+    enum ColorMode {
+        Follow,
+        Own3,
+        Journey,
+    }
+    let mut mode = if idle.stops.len() >= 2 {
+        ColorMode::Journey
+    } else if idle.colors.is_some() {
+        ColorMode::Own3
+    } else {
+        ColorMode::Follow
+    };
+    ui.horizontal(|ui| {
+        ui.label("Idle colors");
+        let text = match mode {
+            ColorMode::Follow => "Follow the normal colors",
+            ColorMode::Own3 => "Own 3 colors",
+            ColorMode::Journey => "🌈 Own multi-color journey",
+        };
+        egui::ComboBox::from_id_salt(format!("idle_colors_{salt}"))
+            .selected_text(text)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(mode == ColorMode::Follow, "Follow the normal colors")
+                    .on_hover_text("Idle keeps the zone's own gradient — only the effect changes.")
+                    .clicked()
+                {
+                    mode = ColorMode::Follow;
+                }
+                if ui
+                    .selectable_label(mode == ColorMode::Own3, "Own 3 colors")
+                    .on_hover_text("A classic cold/warm/hot trio just for the idle look — e.g. dim blues while resting.")
+                    .clicked()
+                {
+                    mode = ColorMode::Own3;
+                }
+                if ui
+                    .selectable_label(mode == ColorMode::Journey, "🌈 Own multi-color journey")
+                    .on_hover_text("A full custom gradient (up to 8 stops) just for the idle look.")
+                    .clicked()
+                {
+                    mode = ColorMode::Journey;
+                }
+            })
+            .response
+            .on_hover_text("Where the idle look takes its colors from.");
+    });
+    match mode {
+        ColorMode::Follow => {
+            idle.colors = None;
+            idle.stops.clear();
         }
-        if let Some(colors) = &mut s.idle_colors {
+        ColorMode::Own3 => {
+            idle.stops.clear();
+            let colors = idle.colors.get_or_insert(seed_colors);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Cold").small());
                 ui.color_edit_button_srgb(&mut colors.cold_color);
@@ -717,38 +1064,45 @@ fn idle_effect_card(app: &mut App, ui: &mut egui::Ui) {
                 ui.color_edit_button_srgb(&mut colors.hot_color);
             });
         }
+        ColorMode::Journey => {
+            if idle.stops.len() < 2 {
+                idle.stops = match idle.colors {
+                    Some(c) => c.stops(),
+                    None => seed_stops.to_vec(),
+                };
+            }
+            idle.colors = None;
+            journey_stops_editor(ui, &mut idle.stops);
+        }
+    }
 
-        let mut own_pace = s.idle_tuning.is_some();
-        if ui
-            .checkbox(&mut own_pace, "Custom speed && intensity for the idle look")
-            .on_hover_text("Idle usually wants to be slower and softer than the normal effect — tune it here without touching the effect's global tuning.")
-            .changed()
-        {
-            s.idle_tuning = if own_pace {
-                Some(argb_core::settings::EffectTuning {
-                    speed: 0.5,
-                    intensity: 0.35,
-                    ..s.tuning(s.idle_effect)
-                })
-            } else {
-                None
-            };
-        }
-        if let Some(tuning) = &mut s.idle_tuning {
-            ui.add(
-                egui::Slider::new(&mut tuning.speed, 0.25..=3.0)
-                    .custom_formatter(|v, _| format!("{v:.2}×"))
-                    .text("Idle speed"),
-            )
-            .on_hover_text("How fast the idle animation moves. 0.5× makes a lovely calm resting state.");
-            ui.add(
-                egui::Slider::new(&mut tuning.intensity, 0.0..=1.0)
-                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                    .text("Idle intensity"),
-            )
-            .on_hover_text("How pronounced the idle animation is — lower = softer, dreamier.");
-        }
-    });
+    let mut own_pace = idle.tuning.is_some();
+    if ui
+        .checkbox(&mut own_pace, "Custom speed && intensity for the idle look")
+        .on_hover_text("Idle usually wants to be slower and softer than the normal effect — tune it here without touching the effect's global tuning.")
+        .changed()
+    {
+        idle.tuning = if own_pace {
+            let base = tuning_map.get(&idle.effect).copied().unwrap_or_default();
+            Some(argb_core::settings::EffectTuning { speed: 0.5, intensity: 0.35, ..base })
+        } else {
+            None
+        };
+    }
+    if let Some(tuning) = &mut idle.tuning {
+        ui.add(
+            egui::Slider::new(&mut tuning.speed, 0.25..=3.0)
+                .custom_formatter(|v, _| format!("{v:.2}×"))
+                .text("Idle speed"),
+        )
+        .on_hover_text("How fast the idle animation moves. 0.5× makes a lovely calm resting state.");
+        ui.add(
+            egui::Slider::new(&mut tuning.intensity, 0.0..=1.0)
+                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                .text("Idle intensity"),
+        )
+        .on_hover_text("How pronounced the idle animation is — lower = softer, dreamier.");
+    }
 }
 
 fn effect_tuning_card(app: &mut App, ui: &mut egui::Ui) {
@@ -848,7 +1202,6 @@ fn effect_tuning_card(app: &mut App, ui: &mut egui::Ui) {
             .clicked()
         {
             s.effect_tuning.remove(&mode);
-            changed = false;
         } else if changed {
             s.effect_tuning.insert(mode, tuning.clamped(mode));
         }

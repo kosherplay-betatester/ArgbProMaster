@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4 — Total Control (2026-07-30)
+- **🎯 Per-zone everything**: a scope selector in 🌡 Thermal Curves edits
+  either the whole rig (🌐 All zones) or one port/device at a time. Each
+  zone can now carry its own multi-stop Color Journey, its own effect,
+  **⤾ reverse direction**, its own **speed & intensity**, and a **fully
+  independent 😴 idle setup** (own range, effect, colors and pace — or opt
+  out of idle entirely). One-click 📢 buttons bring every zone back to the
+  global look.
+- **Idle multi-color journey**: the idle look can travel its own custom
+  gradient (up to 8 stops) — globally and per zone.
+- **8 new effects (25 total)**: DNA Helix, Lightning Storm, Candle Flame,
+  Ocean Tide, Pendulum Wave, Stardust, Digital Rain, Kaleidoscope — each
+  with two style variants and full tuning.
+- **6 new presets (15 total)**: 💻 Matrix Code, 🌊 Deep Ocean,
+  🕯 Candlelight, ⛈ Thunderstorm, ✨ Galaxy Dust, 🧬 Double Helix.
+- All of it crossfades and slew-limits exactly like before — the
+  photosensitive-safety guarantees are untouched.
+
 ## 1.3 — Always Smooth, Seizure-Safe (2026-07-28)
 - **One-click installer** (`ArgbProMaster-Setup.exe`): installs the app,
   OpenRGB and MSI Afterburner (winget), configures OpenRGB's start-with-
