@@ -36,6 +36,111 @@ pub struct Readings {
     pub fps_max: f32,
 }
 
+/// Fold one shared-memory source into the readings. Pure, so the matching
+/// rules are unit-testable.
+///
+/// GPU rules learned on an iGPU + dGPU rig (7950X3D + RTX 5070 Ti):
+/// Afterburner names per-GPU sources "GPU2 temperature" etc., may or may not
+/// export a plain "GPU temperature" aggregate, and the numbering does NOT
+/// promise the discrete card comes first. So every GPU temperature/usage
+/// source participates and the HOTTEST/BUSIEST value wins — under any load
+/// that matters that is the dedicated GPU, and it degrades gracefully to
+/// whatever single GPU is monitored. "memory" sources are excluded: "GPU2
+/// memory usage" is megabytes, not percent.
+pub(crate) fn fold_source(r: &mut Readings, name: &str, value: f32, max_limit: f32) {
+    if !value.is_finite() || !(-1000.0..=1_000_000.0).contains(&value) {
+        return; // Afterburner pads unused slots with FLT_MAX sentinels
+    }
+    let temp_ok = (-100.0..200.0).contains(&value);
+    let is_memory = name.to_ascii_lowercase().contains("memory");
+    if name.eq_ignore_ascii_case("CPU temperature") && temp_ok {
+        r.cpu_temp = Some(value);
+    } else if r.cpu_temp.is_none() && temp_ok && name.starts_with("CPU") && name.ends_with("temperature") {
+        r.cpu_temp = Some(value);
+    } else if temp_ok && !is_memory && name.starts_with("GPU") && name.ends_with("temperature") {
+        r.gpu_temp = Some(r.gpu_temp.map_or(value, |v| v.max(value)));
+    } else if name.eq_ignore_ascii_case("CPU usage") {
+        r.cpu_load = Some(value.clamp(0.0, 100.0));
+    } else if r.cpu_load.is_none() && name.starts_with("CPU") && name.ends_with("usage") && !is_memory {
+        r.cpu_load = Some(value.clamp(0.0, 100.0));
+    } else if !is_memory && name.starts_with("GPU") && name.ends_with("usage") {
+        let v = value.clamp(0.0, 100.0);
+        r.gpu_load = Some(r.gpu_load.map_or(v, |cur| cur.max(v)));
+    } else if name.eq_ignore_ascii_case("RAM usage") {
+        // Reported in MB; the entry's max limit is installed RAM.
+        if max_limit > 0.0 {
+            r.ram_pct = Some((value / max_limit * 100.0).clamp(0.0, 100.0));
+        }
+    } else if name.eq_ignore_ascii_case("Framerate") {
+        r.fps = Some(value.max(0.0));
+        if max_limit.is_finite() && max_limit > 0.0 {
+            r.fps_max = max_limit;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fold_source, Readings};
+
+    fn fold_all(entries: &[(&str, f32)]) -> Readings {
+        let mut r = Readings::default();
+        for (name, value) in entries {
+            fold_source(&mut r, name, *value, 0.0);
+        }
+        r
+    }
+
+    #[test]
+    fn dgpu_only_rig_reads_gpu2_sources() {
+        // Exactly the shape seen on the 7950X3D + RTX 5070 Ti rig: no plain
+        // "GPU temperature", the discrete card is GPU2, iGPU unmonitored.
+        let r = fold_all(&[
+            ("GPU2 temperature", 68.0),
+            ("GPU2 usage", 100.0),
+            ("GPU2 memory usage", 1710.0),
+            ("CPU temperature", 65.0),
+            ("CPU usage", 11.4),
+        ]);
+        assert_eq!(r.gpu_temp, Some(68.0));
+        assert_eq!(r.gpu_load, Some(100.0));
+        assert_eq!(r.cpu_temp, Some(65.0));
+    }
+
+    #[test]
+    fn hottest_gpu_wins_on_multi_gpu_rigs() {
+        // iGPU cool and idle, dGPU gaming — order must not matter.
+        let r = fold_all(&[
+            ("GPU1 temperature", 45.0),
+            ("GPU1 usage", 3.0),
+            ("GPU2 temperature", 72.0),
+            ("GPU2 usage", 98.0),
+        ]);
+        assert_eq!(r.gpu_temp, Some(72.0));
+        assert_eq!(r.gpu_load, Some(98.0));
+        let flipped = fold_all(&[
+            ("GPU2 temperature", 72.0),
+            ("GPU1 temperature", 45.0),
+        ]);
+        assert_eq!(flipped.gpu_temp, Some(72.0));
+    }
+
+    #[test]
+    fn memory_sources_never_pollute_load_or_temp() {
+        // "GPU2 memory usage" is MEGABYTES — before an aggregate arrives it
+        // must not be clamped into a fake 100% load.
+        let r = fold_all(&[("GPU2 memory usage", 1710.0), ("GPU2 memory temperature", 88.0)]);
+        assert_eq!(r.gpu_load, None);
+        assert_eq!(r.gpu_temp, None);
+    }
+
+    #[test]
+    fn sentinel_padding_is_ignored() {
+        let r = fold_all(&[("Framerate Min", f32::MAX), ("Framerate", 244.8)]);
+        assert_eq!(r.fps, Some(244.8));
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use super::Temps;
@@ -137,36 +242,7 @@ mod imp {
                         *entry.add(ENTRY_DATA_OFFSET + 11),
                     ]);
 
-                    // Aggregate sources win; per-core/per-gpu entries
-                    // ("CPU1 temperature", "GPU1 usage") fill gaps.
-                    let temp_ok = (-100.0..200.0).contains(&value);
-                    if name.eq_ignore_ascii_case("CPU temperature") && temp_ok {
-                        r.cpu_temp = Some(value);
-                    } else if name.eq_ignore_ascii_case("GPU temperature") && temp_ok {
-                        r.gpu_temp = Some(value);
-                    } else if r.cpu_temp.is_none() && temp_ok && name.starts_with("CPU") && name.ends_with("temperature") {
-                        r.cpu_temp = Some(value);
-                    } else if r.gpu_temp.is_none() && temp_ok && name.starts_with("GPU") && name.ends_with("temperature") {
-                        r.gpu_temp = Some(value);
-                    } else if name.eq_ignore_ascii_case("CPU usage") {
-                        r.cpu_load = Some(value.clamp(0.0, 100.0));
-                    } else if name.eq_ignore_ascii_case("GPU usage") {
-                        r.gpu_load = Some(value.clamp(0.0, 100.0));
-                    } else if r.cpu_load.is_none() && name.starts_with("CPU") && name.ends_with("usage") {
-                        r.cpu_load = Some(value.clamp(0.0, 100.0));
-                    } else if r.gpu_load.is_none() && name.starts_with("GPU") && name.ends_with("usage") {
-                        r.gpu_load = Some(value.clamp(0.0, 100.0));
-                    } else if name.eq_ignore_ascii_case("RAM usage") {
-                        // Reported in MB; the entry's max limit is installed RAM.
-                        if max_limit > 0.0 {
-                            r.ram_pct = Some((value / max_limit * 100.0).clamp(0.0, 100.0));
-                        }
-                    } else if name.eq_ignore_ascii_case("Framerate") {
-                        r.fps = Some(value.max(0.0));
-                        if max_limit.is_finite() && max_limit > 0.0 {
-                            r.fps_max = max_limit;
-                        }
-                    }
+                    super::fold_source(&mut r, &name, value, max_limit);
                 }
                 Some(r)
             }
