@@ -174,6 +174,12 @@ fn main() {
     // Report the detected sources once, so the log shows what this machine
     // provides (works with any CPU/GPU vendor Afterburner supports).
     let mut sources_reported = false;
+    // When Afterburner dies (or was never started), temperatures freeze at
+    // their last values and the lights look "stuck" — usually on the idle
+    // look, since the frozen values are cool. Say so, once per outage, so
+    // daemon.log always explains it.
+    let mut last_sensor_ok = Instant::now();
+    let mut sensors_lost_noted = false;
 
     // Smoothed "working" values per source (TargetSource::index order:
     // CPU °C, GPU °C, CPU load, GPU load, RAM %, FPS), seeded cool/quiet.
@@ -378,7 +384,18 @@ fn main() {
             }
 
             // Pull fresh source targets when Afterburner is available.
-            if let Some(r) = mahm.read() {
+            let readings = mahm.read();
+            if readings.is_some() {
+                last_sensor_ok = Instant::now();
+                if sensors_lost_noted {
+                    sensors_lost_noted = false;
+                    note("sensor readings are back — resuming thermal tracking");
+                }
+            } else if !sensors_lost_noted && last_sensor_ok.elapsed() > Duration::from_secs(30) {
+                sensors_lost_noted = true;
+                note("no sensor readings for 30 s — is MSI Afterburner running? The lights hold their last known temperatures until it returns");
+            }
+            if let Some(r) = readings {
                 if !sources_reported {
                     sources_reported = true;
                     let yn = |o: Option<f32>| if o.is_some() { "yes" } else { "no" };
