@@ -199,6 +199,9 @@ impl OpenRgbClient {
     pub fn connect(addr: SocketAddr, client_name: &str) -> std::io::Result<OpenRgbClient> {
         let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3))?;
         stream.set_nodelay(true)?;
+        // Short timeouts during the handshake only: genuinely ancient
+        // servers never answer the version request, and we don't want a new
+        // connection to hang half a minute discovering that.
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         let mut client = OpenRgbClient {
@@ -207,15 +210,29 @@ impl OpenRgbClient {
             device_list_dirty: false,
         };
 
-        // Negotiate protocol version; very old servers never answer, so a
-        // timeout simply leaves us on protocol 0.
+        // Negotiate protocol version. One timed-out attempt gets a retry:
+        // a server starved of CPU (e.g. an all-core stress test) answers
+        // LATE, not never — and silently degrading a modern server to
+        // protocol 0 changes behavior for the whole session.
         client.send(0, REQUEST_PROTOCOL_VERSION, &CLIENT_PROTOCOL.to_le_bytes())?;
-        if let Ok((_, payload)) = client.recv_expect(REQUEST_PROTOCOL_VERSION) {
+        let mut version = client.recv_expect(REQUEST_PROTOCOL_VERSION);
+        if version.is_err() {
+            version = client.recv_expect(REQUEST_PROTOCOL_VERSION);
+        }
+        if let Ok((_, payload)) = version {
             if payload.len() >= 4 {
                 let server = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
                 client.protocol = server.min(CLIENT_PROTOCOL);
             }
         }
+
+        // Runtime timeouts are deliberately generous: a server starved of
+        // CPU by a stress test / heavy game is SLOW, not DEAD. With 5 s
+        // timeouts every all-core burn produced a false "connection lost"
+        // → reconnect → visible LED jolt, every ~17 s for the whole test.
+        // A truly dead server still fails fast (connection reset on write).
+        client.stream.set_read_timeout(Some(Duration::from_secs(20)))?;
+        client.stream.set_write_timeout(Some(Duration::from_secs(20)))?;
 
         let mut name = client_name.as_bytes().to_vec();
         name.push(0);

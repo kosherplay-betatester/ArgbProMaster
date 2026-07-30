@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "argb_core"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "configurator_gui"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "argb_core",
  "eframe",
@@ -3488,7 +3488,7 @@ dependencies = [
 
 [[package]]
 name = "thermal_daemon"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "argb_core",
 ]

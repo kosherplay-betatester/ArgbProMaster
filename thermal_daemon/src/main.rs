@@ -41,8 +41,8 @@ fn note(msg: &str) {
 const OPENRGB_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6742);
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
 const MAHM_RETRY_DELAY: Duration = Duration::from_secs(5);
-/// How often to verify our devices are still in Direct mode.
-const MODE_GUARD_POLL: Duration = Duration::from_secs(10);
+/// How often to blindly re-assert Direct mode on our devices.
+const MODE_GUARD_POLL: Duration = Duration::from_secs(15);
 
 /// One enabled zone resolved to its live location on the OpenRGB server.
 #[derive(Debug)]
@@ -81,6 +81,72 @@ struct RenderMap {
     /// loop can detect when the OpenRGB GUI (or firmware) steals the mode
     /// back and quietly re-assert Direct.
     direct_modes: Vec<(u32, u32)>,
+}
+
+/// Whole-machine CPU usage straight from the kernel's own counters.
+/// The Afterburner reading can't be used for this: the very stress test we
+/// need to detect also starves Afterburner's poller, freezing its shared
+/// memory at the last pre-burn value.
+#[cfg(windows)]
+mod cpuload {
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct FileTime {
+        lo: u32,
+        hi: u32,
+    }
+    impl FileTime {
+        fn as_u64(self) -> u64 {
+            ((self.hi as u64) << 32) | self.lo as u64
+        }
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetSystemTimes(idle: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
+    }
+    pub struct CpuMeter {
+        idle: u64,
+        total: u64,
+    }
+    impl CpuMeter {
+        pub fn new() -> CpuMeter {
+            let mut m = CpuMeter { idle: 0, total: 0 };
+            let _ = m.sample();
+            m
+        }
+        /// Average CPU use (0..100) since the previous call.
+        pub fn sample(&mut self) -> f32 {
+            let mut i = FileTime::default();
+            let mut k = FileTime::default();
+            let mut u = FileTime::default();
+            if unsafe { GetSystemTimes(&mut i, &mut k, &mut u) } == 0 {
+                return 0.0;
+            }
+            // Kernel time includes idle time.
+            let idle = i.as_u64();
+            let total = k.as_u64() + u.as_u64();
+            let d_idle = idle.saturating_sub(self.idle);
+            let d_total = total.saturating_sub(self.total);
+            self.idle = idle;
+            self.total = total;
+            if d_total == 0 {
+                return 0.0;
+            }
+            100.0 * (1.0 - d_idle as f32 / d_total as f32)
+        }
+    }
+}
+#[cfg(not(windows))]
+mod cpuload {
+    pub struct CpuMeter;
+    impl CpuMeter {
+        pub fn new() -> CpuMeter {
+            CpuMeter
+        }
+        pub fn sample(&mut self) -> f32 {
+            0.0
+        }
+    }
 }
 
 impl RenderMap {
@@ -149,13 +215,90 @@ fn main() {
         let mut last_mode_guard = Instant::now();
         let mut overruns = 0u32;
         let mut overrun_noted = false;
+        // Server-health gating for the mode guard: the machine must have
+        // been calm for a few consecutive seconds before we're willing to
+        // interrogate the OpenRGB server (see the guard comment below).
+        let mut cpu_meter = cpuload::CpuMeter::new();
+        let mut last_cpu_sample = Instant::now();
+        let mut calm_streak: u32 = 0;
+        let mut pegged = false;
+        // Congestion-adaptive pacing: while socket writes show backpressure,
+        // render fewer frames per second so a CPU-starved OpenRGB never
+        // falls behind our stream. Every effect is time-based (wall clock +
+        // integrated phase), so a lower frame rate slows nothing and jumps
+        // nothing — the animation simply gets sampled less often, and the
+        // slew limiter's step scales with the real frame dt automatically.
+        let mut congested_until = Instant::now();
+        let mut heavily_congested_until = Instant::now();
         'frames: loop {
             let frame_start = Instant::now();
 
+            // One system-load sample per second. Both signals count: the
+            // kernel's own counters (immune to sensor stalls) and, when
+            // available, Afterburner's CPU load. TCP buffering hides server
+            // congestion until the moment it is total — writes cost ~0 ms
+            // right up until one blocks for the full timeout — so the ONLY
+            // reliable strategy is proactive: while the machine is pegged,
+            // ease the frame rate BEFORE the pipe can fill (production
+            // drops well under a starved server's measured drain rate) and
+            // pause the mode guard. Hysteresis: pegged at ≥85%, back to
+            // normal after 3 consecutive seconds under 70%.
+            if last_cpu_sample.elapsed() >= Duration::from_secs(1) {
+                last_cpu_sample = Instant::now();
+                let load = cpu_meter.sample().max(target[2]);
+                if load >= 85.0 {
+                    calm_streak = 0;
+                    if !pegged {
+                        pegged = true;
+                        note(&format!(
+                            "high system load ({load:.0}% CPU) — easing LED updates and pausing mode checks until it passes"
+                        ));
+                    }
+                } else if load < 70.0 {
+                    calm_streak = calm_streak.saturating_add(1);
+                    if pegged && calm_streak >= 3 {
+                        pegged = false;
+                        note("system load back to normal — full frame rate restored");
+                    }
+                } else {
+                    calm_streak = 0;
+                }
+            }
+
             // Anyone (the OpenRGB GUI, another SDK client) can flip a device
             // out of Direct mode behind our back — the stream then becomes
-            // invisible while every write still succeeds. Poll and reclaim.
-            if !map.direct_modes.is_empty() && last_mode_guard.elapsed() >= MODE_GUARD_POLL {
+            // invisible while every write still succeeds. Poll and reclaim —
+            // but ONLY while the machine has been calm for a few seconds.
+            // This check is a request/response round-trip, and a server
+            // starved of CPU by an all-core stress test (FurMark, Cinebench)
+            // can sit on the reply for 20+ seconds — long enough that the
+            // read timeout gets mistaken for a dead connection, producing a
+            // reconnect strobe across every LED for the whole test. The bare
+            // LED write stream is proven to survive full load; questions are
+            // not — and nobody is fiddling with OpenRGB modes mid-burn.
+            // (Blindly re-sending Direct instead was tried and rejected: a
+            // periodic mode-set reconfigures the controller and makes the
+            // LEDs visibly blink every cycle.)
+            if !pegged
+                && calm_streak >= 3
+                && !map.direct_modes.is_empty()
+                && last_mode_guard.elapsed() >= MODE_GUARD_POLL
+                // Last-instant re-check straight from the kernel: the 1 s
+                // sampling cadence leaves a window where a stress test began
+                // milliseconds ago and the server is already starved — one
+                // cheap syscall closes it before we commit to a round-trip.
+                && {
+                    let load = cpu_meter.sample().max(target[2]);
+                    if load >= 85.0 {
+                        calm_streak = 0;
+                        pegged = true;
+                        note(&format!(
+                            "high system load ({load:.0}% CPU) — easing LED updates and pausing mode checks until it passes"
+                        ));
+                    }
+                    !pegged
+                }
+            {
                 last_mode_guard = Instant::now();
                 let mut lost_connection = false;
                 for entry in map.direct_modes.iter_mut() {
@@ -278,12 +421,36 @@ fn main() {
             let sources = engine::SourceValues { raw: work, norm, phase };
             let time = animation_start.elapsed().as_secs_f64();
 
-            if send_frame(&mut client, &mut map, &settings, time, &sources, dt).is_err() {
-                note("OpenRGB connection lost — reconnecting");
-                break 'frames;
+            let mut frame_time = Duration::from_secs_f32(1.0 / settings.animation_fps.max(1) as f32);
+            match send_frame(&mut client, &mut map, &settings, time, &sources, dt) {
+                Ok(slowest_write) => {
+                    // Healthy writes land in the socket buffer instantly. A
+                    // slow one means the server is congested: keep the mode
+                    // guard away, and back the frame rate off (10 FPS, or
+                    // 2.5 FPS when it's really wedged) until the pipe has
+                    // been visibly healthy again for a few seconds. Without
+                    // this, a long all-core burn slowly fills every buffer
+                    // until a write times out — one hard LED jolt per
+                    // minute-and-a-half of stress test.
+                    if slowest_write > Duration::from_millis(150) {
+                        calm_streak = 0;
+                        last_mode_guard = Instant::now();
+                        congested_until = Instant::now() + Duration::from_secs(5);
+                    }
+                    if slowest_write > Duration::from_millis(500) {
+                        heavily_congested_until = Instant::now() + Duration::from_secs(10);
+                    }
+                }
+                Err(_) => {
+                    note("OpenRGB connection lost — reconnecting");
+                    break 'frames;
+                }
             }
-
-            let frame_time = Duration::from_secs_f32(1.0 / settings.animation_fps.max(1) as f32);
+            if Instant::now() < heavily_congested_until {
+                frame_time = frame_time.max(Duration::from_millis(400));
+            } else if pegged || Instant::now() < congested_until {
+                frame_time = frame_time.max(Duration::from_millis(100));
+            }
             match frame_time.checked_sub(frame_start.elapsed()) {
                 Some(rest) => {
                     overruns = 0;
@@ -464,6 +631,8 @@ fn switch_to_direct(
 // Frame rendering
 // ---------------------------------------------------------------------------
 
+/// Returns the slowest single socket write of the frame — the caller uses it
+/// as a congestion signal (healthy writes are effectively instant).
 fn send_frame(
     client: &mut OpenRgbClient,
     map: &mut RenderMap,
@@ -471,7 +640,7 @@ fn send_frame(
     time: f64,
     sources: &engine::SourceValues,
     frame_dt: f32,
-) -> std::io::Result<()> {
+) -> std::io::Result<Duration> {
     // How long a look-change (idle kicking in, preset/effect/color switch)
     // melts into the new effect instead of hard-cutting — user-tunable.
     let style_fade_secs = settings.transition_secs.clamp(0.2, 5.0);
@@ -480,6 +649,7 @@ fn send_frame(
     /// hovering exactly on the edge otherwise strobes between two looks.
     const IDLE_EXIT_MARGIN: f32 = 2.0;
     const IDLE_DWELL: Duration = Duration::from_secs(3);
+    let mut slowest_write = Duration::ZERO;
 
     for zone in map.zones.iter_mut() {
         let Some(cfg) = settings.zones.get(zone.cfg) else {
@@ -565,14 +735,16 @@ fn send_frame(
         {
             continue;
         }
+        let write_started = Instant::now();
         if zone.zone_idx >= 0 {
             client.update_zone(zone.device, zone.zone_idx as u32, &frame)?;
         } else {
             client.update_leds(zone.device, &frame)?;
         }
+        slowest_write = slowest_write.max(write_started.elapsed());
         zone.last_frame = frame;
         zone.last_sent = Some(Instant::now());
     }
-    Ok(())
+    Ok(slowest_write)
 }
 

@@ -499,11 +499,14 @@ pub fn curves_tab(app: &mut App, ui: &mut egui::Ui) {
     }
     scope_card(app, ui);
     ui.add_space(8.0);
+    // The CPU/GPU response windows are shared by every zone — they define
+    // what "cold" and "hot" mean for all journeys, so they stay visible in
+    // both scopes.
+    global_ranges_cards(app, ui);
+    ui.add_space(8.0);
 
     match app.curves_zone {
         None => {
-            global_ranges_cards(app, ui);
-            ui.add_space(8.0);
             global_journey_card(app, ui);
             ui.add_space(8.0);
             global_idle_card(app, ui);
@@ -588,7 +591,7 @@ fn global_ranges_cards(app: &mut App, ui: &mut egui::Ui) {
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("CPU Response Range").strong());
         ui.label(
-            RichText::new("Most CPUs idle around 40–50 °C and peak near 85–95 °C under load.")
+            RichText::new("Most CPUs idle around 40–50 °C and peak near 85–95 °C under load. Shared by every zone and journey.")
                 .small()
                 .color(theme::TEXT_DIM),
         );
@@ -604,7 +607,7 @@ fn global_ranges_cards(app: &mut App, ui: &mut egui::Ui) {
     theme::card_frame().show(ui, |ui| {
         ui.label(RichText::new("GPU Response Range").strong());
         ui.label(
-            RichText::new("GPUs usually idle cooler than CPUs — a lower window feels livelier.")
+            RichText::new("GPUs usually idle cooler than CPUs — a lower window feels livelier. Shared by every zone and journey.")
                 .small()
                 .color(theme::TEXT_DIM),
         );

@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.1 — Stress-Proof (2026-07-30)
+- **No more flicker under stress tests — proven by a 150 s all-core burn
+  with zero connection losses.** An all-core CPU burn (FurMark,
+  Cinebench…) starves the OpenRGB server of CPU. Two failure modes
+  followed: the daemon's periodic "are you still in Direct mode?"
+  round-trip timed out (slow ≠ dead) and forced a reconnect that jolted
+  every LED ~every 17 s — and even without questions, a long burn let
+  the LED stream slowly outpace the starved server until a socket
+  buffer filled and a write timed out (TCP hides congestion until the
+  moment it's total). The fix is proactive: the daemon watches
+  whole-machine CPU load straight from the kernel (sensor apps freeze
+  stale under exactly this load), and while the machine is pegged it
+  eases the frame rate (production stays far under the starved server's
+  drain rate) and pauses mode checks — announcing both transitions in
+  daemon.log. Backpressure detection, 20 s timeouts and a protocol-
+  handshake retry back it up. Frame-rate changes are invisible: every
+  effect is clock-driven, so nothing speeds up, slows down or jumps.
+- The CPU/GPU Response Range cards are visible in BOTH 🎯 scopes again —
+  they're shared by every zone and journey, and now say so.
+- Still featherweight: 0.02% CPU / 5.3 MB RAM measured while streaming.
+
 ## 1.4 — Total Control (2026-07-30)
 - **🎯 Per-zone everything**: a scope selector in 🌡 Thermal Curves edits
   either the whole rig (🌐 All zones) or one port/device at a time. Each
