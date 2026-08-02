@@ -285,11 +285,7 @@ impl App {
     /// state — stock settings, every detected zone switched on, Thermal Alert
     /// applied, daemon running. From there the user shapes it at will.
     pub fn fix_my_rgb(&mut self) {
-        let kept_presets = self.settings.custom_presets.clone();
-        let kept_zones = self.settings.zones.clone();
-        self.settings = Settings::default();
-        self.settings.custom_presets = kept_presets;
-        self.settings.zones = kept_zones;
+        self.settings.factory_reset_keeping_user_content();
         let mut enabled = 0usize;
         for zone in self.settings.zones.iter_mut() {
             zone.effect_override = None;

@@ -918,6 +918,20 @@ impl Settings {
         self.custom_effects.iter().find(|f| f.name == name)
     }
 
+    /// Factory-reset every setting while keeping everything the user
+    /// authored: the zone setup, custom presets and the ★ Effect Lab
+    /// library. Every "reset to defaults" style action must go through
+    /// here — a reset may never delete user-built content.
+    pub fn factory_reset_keeping_user_content(&mut self) {
+        let zones = std::mem::take(&mut self.zones);
+        let presets = std::mem::take(&mut self.custom_presets);
+        let effects = std::mem::take(&mut self.custom_effects);
+        *self = Settings::default();
+        self.zones = zones;
+        self.custom_presets = presets;
+        self.custom_effects = effects;
+    }
+
     /// Tuning for an effect, falling back to defaults when never customized.
     pub fn tuning(&self, mode: EffectsMode) -> EffectTuning {
         self.effect_tuning
@@ -1275,5 +1289,26 @@ mod tests {
         assert_eq!(z.effective_leds(), 72);
         z.led_count = 500;
         assert_eq!(z.effective_leds(), 120); // clamped to hardware max
+    }
+
+    #[test]
+    fn factory_reset_keeps_everything_the_user_authored() {
+        let mut s = Settings::default();
+        s.global_brightness = 0.42;
+        s.effects_mode = EffectsMode::CometChase;
+        s.zones.push(ZoneConfig { zone_name: "Z".into(), ..ZoneConfig::default() });
+        s.custom_presets.push(CustomPreset { name: "mine".into(), data: PresetData::capture(&s) });
+        s.custom_effects.push(CustomEffect { name: "dragon flame".into(), ..CustomEffect::default() });
+
+        s.factory_reset_keeping_user_content();
+
+        // Settings themselves are factory-fresh again...
+        assert_eq!(s.global_brightness, Settings::default().global_brightness);
+        assert_eq!(s.effects_mode, Settings::default().effects_mode);
+        // ...but nothing the user built is gone.
+        assert_eq!(s.zones.len(), 1);
+        assert_eq!(s.custom_presets.len(), 1);
+        assert_eq!(s.custom_effects.len(), 1);
+        assert!(s.custom_effect("dragon flame").is_some());
     }
 }

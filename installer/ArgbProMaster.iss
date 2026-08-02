@@ -14,7 +14,7 @@
 ;   - sets the lighting daemon to start with Windows (same notification)
 ;   - launches the configurator at the end
 
-#define MyAppVersion "1.4.1"
+#define MyAppVersion "1.4.2"
 
 [Setup]
 AppId={{8F7C1D2E-4A5B-4C6D-9E0F-1A2B3C4D5E6F}

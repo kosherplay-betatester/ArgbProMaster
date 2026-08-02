@@ -6,7 +6,7 @@ use crate::theme;
 use crate::util;
 use argb_core::presets::{apply_builtin, BUILTIN_PRESETS};
 use argb_core::settings::{
-    ColorConfig, CustomPreset, EffectsMode, PresetData, Settings, TargetSource, ZoneConfig,
+    ColorConfig, CustomPreset, EffectsMode, PresetData, TargetSource, ZoneConfig,
 };
 use argb_core::zones::{device_emoji, device_kind_label};
 use eframe::egui::{self, Color32, CornerRadius, RichText};
@@ -1322,15 +1322,11 @@ pub fn advanced_tab(app: &mut App, ui: &mut egui::Ui) {
             }
             if ui
                 .add(egui::Button::new(RichText::new("♻ Reset All to Defaults").color(theme::DANGER)))
-                .on_hover_text("Restores every APP setting to factory defaults. Your zone setup and custom presets are kept.")
+                .on_hover_text("Restores every APP setting to factory defaults. Your zone setup, custom presets and ★ custom effects are kept.")
                 .clicked()
             {
-                let kept = app.settings.custom_presets.clone();
-                let kept_zones = app.settings.zones.clone();
-                app.settings = Settings::default();
-                app.settings.custom_presets = kept;
-                app.settings.zones = kept_zones;
-                app.toast("Settings reset to defaults (zones and custom presets kept).".to_string(), theme::WARN);
+                app.settings.factory_reset_keeping_user_content();
+                app.toast("Settings reset to defaults (zones, custom presets and ★ custom effects kept).".to_string(), theme::WARN);
             }
             let restoring = app.restore_running();
             if ui

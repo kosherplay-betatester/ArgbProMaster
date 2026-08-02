@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.2 — Nothing You Built Gets Lost (2026-08-02)
+- **🔧 Fix My RGB and ♻ Reset All to Defaults no longer delete your
+  ★ Effect Lab custom effects.** Both buttons rebuilt the settings from
+  factory defaults and only carried zones and presets across — any preset
+  or zone that referenced a wiped custom effect then silently fell back
+  to the global builtin, so the rig kept lighting but stopped looking
+  like *your* rig. All reset actions now flow through one shared
+  `factory_reset_keeping_user_content()` that preserves zones, custom
+  presets **and** the Effect Lab library, with a regression test so it
+  can never quietly regress.
+
 ## 1.4.1 — Stress-Proof (2026-07-30)
 - **No more flicker under stress tests — proven by a 150 s all-core burn
   with zero connection losses.** An all-core CPU burn (FurMark,
